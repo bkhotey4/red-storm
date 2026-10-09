@@ -1,0 +1,39 @@
+; Engine configuration file.
+config_version=5
+
+[application]
+
+config/name="紅色風暴 Red Storm"
+config/description="RA2-style isometric real-time strategy (original fan project)."
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+
+[autoload]
+
+Defs="*res://scripts/defs.gd"
+G="*res://scripts/g.gd"
+Sfx="*res://scripts/sfx.gd"
+
+[audio]
+
+general/text_to_speech=true
+
+[display]
+
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/size/mode=2
+window/size/resizable=true
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+environment/defaults/default_clear_color=Color(0.05, 0.06, 0.05, 1)
+anti_aliasing/quality/msaa_2d=1
+
+[physics]
+
+common/physics_ticks_per_second=30
