@@ -33,6 +33,7 @@ func _ready():
 	add_child(ack_player)
 	music_player = AudioStreamPlayer.new()
 	add_child(music_player)
+	music_player.finished.connect(_on_music_finished)
 
 func load_wav(path: String) -> AudioStreamWAV:
 	if not FileAccess.file_exists(path):
@@ -157,10 +158,51 @@ func ack(name: String):
 	ack_player.volume_db = linear_to_db(maxf(0.001, float(G.settings.voice_vol))) - 3.0
 	ack_player.play()
 
+# 戰鬥配樂：三首輪播，曲與曲之間留 15～30 秒的安靜（玩家回饋：單曲循環很煩躁）
+const BATTLE_TRACKS := ["battle_1", "battle_2", "battle_3"]
+var battle_order: Array = []
+var music_token := 0
+
+func load_music(name: String):
+	var p := "res://audio/music/%s.ogg" % name
+	if ResourceLoader.exists(p):
+		var r = load(p)
+		if r is AudioStream:
+			return r
+	if FileAccess.file_exists(p):
+		return AudioStreamOggVorbis.load_from_file(p)
+	return null
+
+func next_battle_track():
+	if battle_order.is_empty():
+		battle_order = BATTLE_TRACKS.duplicate()
+		battle_order.shuffle()
+	var s = load_music(battle_order.pop_front())
+	if s == null:
+		return
+	if s is AudioStreamOggVorbis:
+		s.loop = false
+	music_player.stream = s
+	update_music_volume()
+	music_player.play()
+
+func _on_music_finished():
+	if music_name != "battle":
+		return
+	music_token += 1
+	var tok := music_token
+	get_tree().create_timer(randf_range(15.0, 30.0)).timeout.connect(func():
+		if tok == music_token and music_name == "battle" and not music_player.playing:
+			next_battle_track())
+
 func music(name: String):
 	if music_name == name and music_player.playing:
 		return
 	music_name = name
+	music_token += 1
+	if name == "battle" and load_music(BATTLE_TRACKS[0]) != null:
+		next_battle_track()
+		return
 	var s := load_wav("res://audio/music/%s.wav" % name)
 	if s == null:
 		return
@@ -172,4 +214,5 @@ func music(name: String):
 	music_player.play()
 
 func update_music_volume():
-	music_player.volume_db = linear_to_db(maxf(0.001, float(G.settings.get("music_vol", 0.5)))) - 6.0
+	var v := 0.0 if G.settings.get("music_muted", false) else float(G.settings.get("music_vol", 0.35))
+	music_player.volume_db = linear_to_db(maxf(0.001, v)) - 6.0

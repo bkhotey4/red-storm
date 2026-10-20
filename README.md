@@ -30,6 +30,7 @@
 | D | 展開基地車 |
 | Ctrl + 數字 | 編隊 |
 | 空白鍵 | 跳到最近警報 |
+| M | 背景音樂開／關 |
 | F1 | 完整操作說明 |
 
 完整說明請見 [遊戲說明.txt](src/遊戲說明.txt)。
@@ -51,6 +52,7 @@
 
 - 遊戲美術與音效為本專案原創／程式產生
 - 介面字型：[Noto Sans TC](https://fonts.google.com/noto/specimen/Noto+Sans+TC)，SIL Open Font License 1.1（見 `src/fonts/OFL.txt`）
+- 戰鬥配樂：以 `tools/music_generator.py` 程序合成（原創）
 - 語音：以文字轉語音（TTS）產生
 
 ## 聲明

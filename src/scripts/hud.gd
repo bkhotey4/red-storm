@@ -825,7 +825,7 @@ func _draw_top():
 				parts.append("%s x%d" % [k, counts[k]])
 			ci.draw_string(G.font, r.position + Vector2(10, 46), "、".join(parts), HORIZONTAL_ALIGNMENT_LEFT, pw - 20, 13, Color(0.85, 0.85, 0.85))
 	# hint bar
-	var hint := "右鍵拖曳:移動畫面　左鍵:選取/框選　右鍵:移動/攻擊　A:攻擊移動　S:停止　F:技能　D:展開基地車　Ctrl+數字:編隊　H:回基地　空白:最近警報　N:閒置礦車　I:閒置單位　Tab:生產建築　滾輪:縮放"
+	var hint := "右鍵拖曳:移動畫面　左鍵:選取/框選　右鍵:移動/攻擊　A:攻擊移動　S:停止　F:技能　D:展開基地車　Ctrl+數字:編隊　H:回基地　空白:最近警報　M:音樂開關　N:閒置礦車　I:閒置單位　Tab:生產建築　滾輪:縮放"
 	ci.draw_rect(Rect2(0, vs.y - 22, vs.x - SW, 22), Color(0, 0, 0, 0.55))
 	ci.draw_string(G.font, Vector2(10, vs.y - 6), hint, HORIZONTAL_ALIGNMENT_LEFT, vs.x - SW - 20, 12, Color(0.75, 0.75, 0.72))
 	# placement tip

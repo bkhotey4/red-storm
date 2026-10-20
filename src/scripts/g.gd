@@ -20,7 +20,7 @@ var settings := {
 	"map_size": 72,
 	"sfx_vol": 0.8,
 	"voice_vol": 1.0,
-	"music_vol": 0.5,
+	"music_vol": 0.35,
 	"speed": 1.0,
 	"edge_scroll": true,
 }
@@ -70,6 +70,7 @@ class Sheet:
 
 func _ready():
 	load_settings()
+	migrate_audio()
 	# 內嵌思源黑體（Noto Sans TC，OFL 授權）：網頁版、Mac、Steam Deck 都沒有微軟正黑體
 	var sys := SystemFont.new()
 	sys.font_names = PackedStringArray(["Microsoft JhengHei UI", "Microsoft JhengHei", "Microsoft YaHei UI", "Microsoft YaHei",
@@ -234,13 +235,20 @@ func adiff(a: float, b: float) -> float:
 func load_settings():
 	var cf := ConfigFile.new()
 	if cf.load("user://settings.cfg") == OK:
-		for k in ["sfx_vol", "voice_vol", "music_vol", "edge_scroll", "faction", "country", "scroll_speed", "intro_seen", "campaign_done", "unlock_all", "mapsize", "menu_bg", "tips_count", "left_pan"]:
+		for k in ["sfx_vol", "voice_vol", "music_vol", "edge_scroll", "faction", "country", "scroll_speed", "intro_seen", "campaign_done", "unlock_all", "mapsize", "menu_bg", "tips_count", "left_pan", "music_muted", "audio_rev"]:
 			if cf.has_section_key("s", k):
 				settings[k] = cf.get_value("s", k)
 
+# 舊存檔的音樂音量預設是 0.5，配樂改版時降到 0.35（只執行一次）
+func migrate_audio():
+	if int(settings.get("audio_rev", 0)) < 1:
+		settings["music_vol"] = minf(float(settings.get("music_vol", 0.35)), 0.35)
+		settings["audio_rev"] = 1
+		save_settings()
+
 func save_settings():
 	var cf := ConfigFile.new()
-	for k in ["sfx_vol", "voice_vol", "music_vol", "edge_scroll", "faction", "country", "scroll_speed", "intro_seen", "campaign_done", "unlock_all", "mapsize", "menu_bg", "tips_count", "left_pan"]:
+	for k in ["sfx_vol", "voice_vol", "music_vol", "edge_scroll", "faction", "country", "scroll_speed", "intro_seen", "campaign_done", "unlock_all", "mapsize", "menu_bg", "tips_count", "left_pan", "music_muted", "audio_rev"]:
 		if settings.has(k):
 			cf.set_value("s", k, settings[k])
 	cf.save("user://settings.cfg")

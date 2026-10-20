@@ -244,6 +244,13 @@ func _ready():
 			for k in 30:
 				game.events.append({"t": 1.0 + k * 1.0, "fn": func():
 					print("  CAM t=%d pos=%s mouse=%s focus=%s" % [int(game.time), str(game.cam.position.round()), str(get_viewport().get_mouse_position().round()), DisplayServer.window_is_focused()])})
+		if args.has("--musictest"):
+			game.events.append({"t": 2.0, "fn": func():
+				print("  MUSIC start=", Sfx.music_player.stream.resource_path if Sfx.music_player.stream else "none", " playing=", Sfx.music_player.playing, " vol_db=", snappedf(Sfx.music_player.volume_db, 0.1), " order_left=", Sfx.battle_order)
+				Sfx.music_player.stop()
+				Sfx._on_music_finished()})
+			game.events.append({"t": 34.0, "fn": func():
+				print("  MUSIC after gap=", Sfx.music_player.stream.resource_path if Sfx.music_player.stream else "none", " playing=", Sfx.music_player.playing)})
 		if args.has("--tipsshot"):
 			game.tip_until = 90.0
 		if args.has("--inputtest"):

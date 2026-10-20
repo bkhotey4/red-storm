@@ -2343,6 +2343,11 @@ func key_press(k: InputEventKey):
 			if not selection.is_empty() and is_instance_valid(selection[0]):
 				var tid: String = selection[0].type_id
 				select_list(units.filter(func(u): return u.player == human and u.type_id == tid))
+		KEY_M:
+			G.settings["music_muted"] = not G.settings.get("music_muted", false)
+			G.save_settings()
+			Sfx.update_music_volume()
+			message("背景音樂：%s（M 鍵切換）" % ("關閉" if G.settings.music_muted else "開啟"))
 		KEY_F:
 			var n := 0
 			var nm := ""
