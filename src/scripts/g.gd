@@ -234,13 +234,13 @@ func adiff(a: float, b: float) -> float:
 func load_settings():
 	var cf := ConfigFile.new()
 	if cf.load("user://settings.cfg") == OK:
-		for k in ["sfx_vol", "voice_vol", "music_vol", "edge_scroll", "faction", "country", "scroll_speed", "intro_seen", "campaign_done", "unlock_all", "mapsize", "menu_bg"]:
+		for k in ["sfx_vol", "voice_vol", "music_vol", "edge_scroll", "faction", "country", "scroll_speed", "intro_seen", "campaign_done", "unlock_all", "mapsize", "menu_bg", "tips_count", "left_pan"]:
 			if cf.has_section_key("s", k):
 				settings[k] = cf.get_value("s", k)
 
 func save_settings():
 	var cf := ConfigFile.new()
-	for k in ["sfx_vol", "voice_vol", "music_vol", "edge_scroll", "faction", "country", "scroll_speed", "intro_seen", "campaign_done", "unlock_all", "mapsize", "menu_bg"]:
+	for k in ["sfx_vol", "voice_vol", "music_vol", "edge_scroll", "faction", "country", "scroll_speed", "intro_seen", "campaign_done", "unlock_all", "mapsize", "menu_bg", "tips_count", "left_pan"]:
 		if settings.has(k):
 			cf.set_value("s", k, settings[k])
 	cf.save("user://settings.cfg")

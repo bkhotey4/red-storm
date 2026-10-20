@@ -15,6 +15,7 @@ var parade: Array = []
 var camp: Control
 var camp_sel := 0
 var camp_brief: Label
+var menu_vsp: VideoStreamPlayer = null
 
 func _ready():
 	set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -28,6 +29,25 @@ func _ready():
 	if bg_style < 0 or bg_style >= BG_NAMES.size():
 		bg_style = 0
 	setup_parade()
+	_setup_menu_video()
+
+func _setup_menu_video():
+	var vpath := "res://video/redstorm_menu_warfare.ogv"
+	if not FileAccess.file_exists(vpath):
+		vpath = "res://video/redstorm_promo_trailer.ogv"
+	if not FileAccess.file_exists(vpath):
+		return
+	var vst := VideoStreamTheora.new()
+	vst.file = vpath
+	menu_vsp = VideoStreamPlayer.new()
+	menu_vsp.stream = vst
+	menu_vsp.volume_db = -80.0
+	menu_vsp.self_modulate = Color(1, 1, 1, 0)
+	add_child(menu_vsp)
+	menu_vsp.finished.connect(func():
+		if is_instance_valid(menu_vsp):
+			menu_vsp.play())
+	menu_vsp.play()
 
 func make_theme() -> Theme:
 	var th := Theme.new()
@@ -296,7 +316,7 @@ func build_ui():
 5. 用工程師佔領中立油井，可持續獲得資金；也能佔領敵方建築！
 6. 摧毀所有敵方建築即可獲勝。
 
-滑鼠：左鍵選取/框選，右鍵移動/攻擊
+滑鼠：左鍵選取/框選，右鍵移動/攻擊，按住右鍵拖曳＝移動畫面
 鍵盤：A 攻擊移動、S 停止、Ctrl+數字 編隊、Z 出售、X 修理
 遊戲中按 F1 可隨時查看完整說明。
 
@@ -478,7 +498,7 @@ func _draw_ken_burns_tex(tex: Texture2D, vs: Vector2, phase: float, alpha: float
 
 func draw_bg_modern_warfare(vs: Vector2):
 	draw_rect(Rect2(0, 0, vs.x, vs.y), Color(0.03, 0.02, 0.02))
-	# 1. 6 張高解析現代戰爭寫實場景輪播 + Ken Burns 動態推軌與平滑疊化
+	# 1. 高解析寫實場景基底 + 全動態現代戰爭實拍與實機混剪背景影片 (VideoStreamPlayer)
 	var cycle_dur := 7.5
 	var total_slides := MODERN_BG_TEX.size()
 	var idx := int(t / cycle_dur) % total_slides
@@ -491,74 +511,33 @@ func draw_bg_modern_warfare(vs: Vector2):
 	if p > (1.0 - fade_w):
 		var fa := (p - (1.0 - fade_w)) / fade_w
 		_draw_ken_burns_tex(tex_nxt, vs, fa * 0.2, fa, 1.0 if nxt % 2 == 0 else -1.0)
-	# 戰場熱血暗紅與火光氛圍漸層
+	if menu_vsp != null and menu_vsp.is_playing():
+		var vtex := menu_vsp.get_video_texture()
+		if vtex != null and vtex.get_width() > 16:
+			draw_texture_rect(vtex, Rect2(0, 0, vs.x, vs.y), false, Color(1, 1, 1, 0.92))
+	# 戰場熱血暗角與面板區對比度強化漸層
 	for i in 12:
 		var ratio := i / 12.0
-		var c := Color(0.06, 0.02, 0.01, 0.42 * (1.0 - ratio) + 0.15)
+		var c := Color(0.04, 0.015, 0.01, 0.36 * (1.0 - ratio) + 0.12)
 		draw_rect(Rect2(0, vs.y * ratio, vs.x, vs.y / 12.0 + 2), c)
-	# 2. 動態多管火箭齊射 (HIMARS / MLRS Rocket Artillery Salvo) 與火光軌跡
-	for k in 7:
-		var rt := fmod(t * 0.55 + k * 0.23, 1.4)
-		if rt < 1.0:
-			var p0 := Vector2(vs.x * (0.50 + k * 0.045), vs.y * 0.72)
-			var p2 := Vector2(vs.x * (0.82 + (k % 3) * 0.05), vs.y * (0.28 + (k % 4) * 0.07))
-			var ctrl := Vector2((p0.x + p2.x) * 0.5 - 60.0, minf(p0.y, p2.y) - 190.0 - k * 18.0)
-			var cur := p0.lerp(ctrl, rt).lerp(ctrl.lerp(p2, rt), rt)
-			var prev_t := maxf(0.0, rt - 0.14)
-			var prev := p0.lerp(ctrl, prev_t).lerp(ctrl.lerp(p2, prev_t), prev_t)
-			draw_line(prev, cur, Color(1.0, 0.55, 0.18, 0.55), 3.5)
-			draw_line(cur.lerp(prev, 0.4), cur, Color(1.0, 0.92, 0.65, 0.95), 2.2)
-			draw_circle(cur, 4.5, Color(1.0, 0.85, 0.4, 0.95))
-			draw_circle(cur, 11.0, Color(1.0, 0.35, 0.1, 0.35))
-		elif rt < 1.25:
-			var ep := Vector2(vs.x * (0.82 + (k % 3) * 0.05), vs.y * (0.28 + (k % 4) * 0.07))
-			var bt := (rt - 1.0) / 0.25
-			draw_circle(ep, 18.0 + bt * 48.0, Color(1.0, 0.45, 0.12, (1.0 - bt) * 0.65))
-			draw_circle(ep, 8.0 + bt * 20.0, Color(1.0, 0.95, 0.75, (1.0 - bt) * 0.85))
-	# 3. 防空曳光彈幕 (CIWS / Gepard Flak Streams) 攔截無人機蜂群
-	for k in 4:
-		var base_flak := Vector2(vs.x * (0.58 + k * 0.09), vs.y * 0.68)
-		var ang := -PI * 0.62 + sin(t * 2.2 + k * 1.4) * 0.28
-		var dir := Vector2.from_angle(ang)
-		for b in 6:
-			var d := fmod(t * 520.0 + b * 65.0 + k * 30.0, 420.0)
-			var p_tr := base_flak + dir * d
-			draw_line(p_tr, p_tr + dir * 18.0, Color(1.0, 0.82, 0.35, 0.85), 2.0)
-	# 4. 戰機編隊與無人機蜂群掠過天際 + 地面鋼鐵洪流實機單位協同展示
-	var blue := Color(0.25, 0.58, 1.0)
-	var red := Color(0.95, 0.20, 0.14)
-	var base_p := Vector2(vs.x * 0.74, vs.y * 0.60)
-	sheet_draw("a_tank", 22, base_p + Vector2(-95, 105), blue, 1.85)
-	sheet_draw("a_tank_t", 22, base_p + Vector2(-95, 105), blue, 1.85)
-	sheet_draw("a_himars", 24, base_p + Vector2(95, 78), blue, 1.75)
-	sheet_draw("a_himars_t", 24, base_p + Vector2(95, 78), blue, 1.75)
-	sheet_draw("s_mammoth", 18, base_p + Vector2(240, 110), red, 1.8)
-	sheet_draw("s_mammoth_t", 18, base_p + Vector2(240, 110), red, 1.8)
-	sheet_draw("s_tos", 14, base_p + Vector2(-240, 65), red, 1.65)
-	sheet_draw("s_tos_t", 14, base_p + Vector2(-240, 65), red, 1.65)
-	sheet_draw("a_apache", 6, base_p + Vector2(-40 + sin(t * 0.9) * 55.0, -165 + cos(t * 1.1) * 14.0), blue, 1.65)
-	for k in 4:
-		var ang := t * 0.85 + k * TAU / 4.0
-		var dp := base_p + Vector2(cos(ang) * 210.0, -120.0 + sin(ang) * 45.0)
-		sheet_draw("a_fpv" if k % 2 == 0 else "s_shahed", int(fmod(ang / TAU * 32.0 + 8.0, 32.0)), dp, blue if k % 2 == 0 else red, 1.35)
-	var jx := fmod(t * 240.0, vs.x + 500.0) - 250.0
-	sheet_draw("a_hornet", 8, Vector2(jx, 155 + sin(t * 2.4) * 8.0), blue, 1.55)
-	sheet_draw("a_hornet", 8, Vector2(jx - 110, 190 + sin(t * 2.4 + 1.0) * 8.0), blue, 1.45)
-	# 戰場火星粒子 (Battlefield Embers)
-	for k in 45:
-		var ex := fmod(k * 149.0 + t * (55.0 + (k % 5) * 18.0), vs.x)
-		var ey := vs.y - fmod(k * 83.0 + t * (40.0 + (k % 4) * 15.0), vs.y * 0.75)
-		var ea := 0.35 + 0.55 * absf(sin(t * 3.0 + k))
-		draw_circle(Vector2(ex, ey), 1.6 + (k % 3) * 0.8, Color(1.0, 0.55 + (k % 3) * 0.15, 0.15, ea))
+	var glow := G.tex("fx_glow")
+	if glow != null:
+		draw_texture_rect(glow, Rect2(vs.x * 0.55, vs.y * 0.15, vs.x * 0.45, vs.y * 0.55), false, Color(1.0, 0.38, 0.12, 0.14 + 0.06 * sin(t * 2.2)))
+	# 戰場細緻火星粒子 (Subtle Battlefield Embers)
+	for k in 32:
+		var ex := fmod(k * 149.0 + t * (45.0 + (k % 5) * 14.0), vs.x)
+		var ey := vs.y - fmod(k * 83.0 + t * (32.0 + (k % 4) * 12.0), vs.y * 0.75)
+		var ea := (0.25 + 0.45 * absf(sin(t * 2.5 + k))) * 0.75
+		draw_circle(Vector2(ex, ey), 1.2 + (k % 2) * 0.6, Color(1.0, 0.55 + (k % 3) * 0.15, 0.15, ea))
 	# 右上角戰情 HUD 標籤
 	var hud_x := vs.x - 620.0
 	var hud_y := 22.0
-	draw_rect(Rect2(hud_x, hud_y, 440, 30), Color(0.08, 0.02, 0.02, 0.78))
-	draw_rect(Rect2(hud_x, hud_y, 6, 30), Color(0.95, 0.18, 0.12, 0.95))
-	draw_circle(Vector2(hud_x + 20, hud_y + 15), 5.0, Color(1.0, 0.2, 0.15, 0.5 + 0.5 * sin(t * 6.0)))
-	draw_string(G.font_bold, Vector2(hud_x + 34, hud_y + 21), MODERN_CAPTIONS[idx], HORIZONTAL_ALIGNMENT_LEFT, 396, 12, Color(1.0, 0.9, 0.75, 0.92))
+	draw_rect(Rect2(hud_x, hud_y, 440, 30), Color(0.06, 0.02, 0.02, 0.82))
+	draw_rect(Rect2(hud_x, hud_y, 5, 30), Color(0.95, 0.18, 0.12, 0.95))
+	draw_circle(Vector2(hud_x + 19, hud_y + 15), 4.5, Color(1.0, 0.2, 0.15, 0.5 + 0.5 * sin(t * 6.0)))
+	draw_string(G.font_bold, Vector2(hud_x + 32, hud_y + 21), MODERN_CAPTIONS[idx], HORIZONTAL_ALIGNMENT_LEFT, 396, 12, Color(1.0, 0.9, 0.75, 0.92))
 	scanlines(vs)
-	ground_parade(vs, Color(0.05, 0.03, 0.02, 0.92))
+	ground_parade(vs, Color(0.04, 0.025, 0.02, 0.94))
 
 func draw_bg_red(vs: Vector2):
 	# background gradient

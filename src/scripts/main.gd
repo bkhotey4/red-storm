@@ -92,7 +92,12 @@ func _ready():
 			get_tree().quit()
 			return
 		if args.has("--battle"):
+			G.settings["edge_scroll"] = false
 			game.debug_battle()
+		for a in args:
+			if a.begins_with("--cinematic="):
+				G.settings["edge_scroll"] = false
+				setup_cinematic_battle(int(a.substr(12)))
 		if args.has("--airtest"):
 			var sc: Vector2i = game.human.start_cell
 			var af = game.place_building(game.human, "a_radar", sc + Vector2i(-3, 4), true)
@@ -234,6 +239,71 @@ func _ready():
 				C.cur.target.take_damage(1e6, null, "he")})
 			game.events.append({"t": 24.0, "fn": func():
 				print("  CONTRACTS done=", C.done, " failed=", C.failed, " money=", int(game.human.money))})
+		if args.has("--tipsshot"):
+			game.tip_until = 90.0
+		if args.has("--inputtest"):
+			game.ais = game.ais.filter(func(a): return a.p != game.human)
+			game.events.append({"t": 2.0, "fn": func():
+				var vp := get_viewport()
+				var c := Vector2(600, 400)
+				var send := func(e): Input.parse_input_event(e); Input.flush_buffered_events()
+				var mb := func(btn, pressed, pos):
+					var e := InputEventMouseButton.new()
+					e.button_index = btn
+					e.pressed = pressed
+					e.position = pos
+					e.global_position = pos
+					return e
+				var mv := func(pos, rel, mask):
+					var e := InputEventMouseMotion.new()
+					e.position = pos
+					e.global_position = pos
+					e.relative = rel
+					e.button_mask = mask
+					return e
+				# 1) 右鍵拖曳 → 畫面移動、不下指令（走真實輸入流程，Input 狀態才會更新）
+				var tank = game.units.filter(func(u): return u.player == game.human and u.ukind == "veh")[0]
+				game.select_list([tank])
+				var cam0: Vector2 = game.cam.position
+				send.call(mb.call(MOUSE_BUTTON_RIGHT, true, c))
+				for k in 10:
+					send.call(mv.call(c - Vector2(k * 12, k * 8), Vector2(-12, -8), MOUSE_BUTTON_MASK_RIGHT))
+				send.call(mb.call(MOUSE_BUTTON_RIGHT, false, c + Vector2(120, 0)))
+				print("  INPUT right-drag cam moved=", game.cam.position.distance_to(cam0), " tank order=", tank.order)
+				# 2) 右鍵點擊（不拖曳）→ 下移動指令
+				send.call(mb.call(MOUSE_BUTTON_RIGHT, true, c))
+				send.call(mb.call(MOUSE_BUTTON_RIGHT, false, c))
+				print("  INPUT right-click tank order=", tank.order)
+				# 3) 觸控板雙指
+				cam0 = game.cam.position
+				var pg := InputEventPanGesture.new()
+				pg.delta = Vector2(3, 2)
+				game._unhandled_input(pg)
+				print("  INPUT pan-gesture cam moved=", game.cam.position.distance_to(cam0))
+				# 4) 左鍵拖曳模式
+				G.settings["left_pan"] = true
+				cam0 = game.cam.position
+				send.call(mb.call(MOUSE_BUTTON_LEFT, true, c))
+				for k in 6:
+					send.call(mv.call(c + Vector2(0, k * 15), Vector2(0, 15), MOUSE_BUTTON_MASK_LEFT))
+				print("  INPUT left-pan lpan=", game.lpan, " moved=", game.cam.position.distance_to(cam0), " box=", game.dragging)
+				send.call(mb.call(MOUSE_BUTTON_LEFT, false, c + Vector2(0, 90)))
+				G.settings["left_pan"] = false
+				# 5) 觸控雙指
+				cam0 = game.cam.position
+				for i in 2:
+					var st := InputEventScreenTouch.new()
+					st.index = i
+					st.pressed = true
+					st.position = c + Vector2(i * 100, 0)
+					game._unhandled_input(st)
+				for k in 5:
+					var sd := InputEventScreenDrag.new()
+					sd.index = 0
+					sd.position = c + Vector2(-k * 10, 0)
+					sd.relative = Vector2(-10, 0)
+					game._unhandled_input(sd)
+				print("  INPUT touch2 cam moved=", game.cam.position.distance_to(cam0), " zoom=", game.zoom)})
 		if args.has("--repeattest"):
 			var inf: String = "a_gi" if game.human.faction == "allies" else "s_con"
 			game.events.append({"t": 100.0, "fn": func():
@@ -588,3 +658,109 @@ func _process(_dt: float):
 func _shot(path: String):
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(path)
+
+func setup_cinematic_battle(sc_id: int):
+	game.ais.clear()
+	game.shroud.visible = false
+	var h = game.human
+	var e = game.players[1]
+	h.money = 28500
+	var sc := Vector2i(h.start_cell)
+	for binfo in [["a_cy", Vector2i(-4, -4)], ["a_power", Vector2i(-7, -4)], ["a_power", Vector2i(-7, -7)], ["a_power", Vector2i(-10, -4)], ["a_power", Vector2i(-10, -7)], ["a_power", Vector2i(-10, -10)], ["a_ref", Vector2i(-4, -8)], ["a_radar", Vector2i(-8, -8)], ["a_fac", Vector2i(-9, -3)], ["a_tech", Vector2i(-12, -7)], ["a_bank", Vector2i(-12, -3)], ["a_dronehub", Vector2i(-7, -11)]]:
+		var b = game.place_building(h, binfo[0], sc + binfo[1], true)
+		if b != null:
+			b.build_p = 1.0
+	h.power_dirty = true
+	game.hud.tab = 3
+	var c := Vector2(game.W * 0.5, game.H * 0.5)
+	game.reveal_all_now()
+	if sc_id == 1:
+		game.zoom = 1.45
+		for eb in [["s_tcoil", Vector2i(4, 2)], ["s_bunker", Vector2i(2, 4)], ["s_sam", Vector2i(6, 0)], ["s_fac", Vector2i(7, 3)], ["s_ref", Vector2i(4, 6)]]:
+			var b = game.place_building(e, eb[0], Vector2i(int(c.x), int(c.y)) + eb[1], true)
+			if b != null: b.build_p = 1.0
+		var h_units := ["a_tank", "a_tank", "a_tank", "a_himars", "a_himars", "a_k9", "a_k9", "a_beam", "a_beam", "a_type10", "a_type10", "a_ifv", "a_jav", "a_jav", "a_jav", "a_gi", "a_gi", "a_apache", "a_apache"]
+		var e_units := ["s_mammoth", "s_mammoth", "s_mammoth", "s_tank", "s_tank", "s_tank", "s_tos", "s_tos", "s_iskander", "s_bmpt", "s_bmpt", "s_arty", "s_tesla", "s_flaktrk", "s_con", "s_con", "s_con", "s_hind"]
+		for k in h_units.size():
+			var u = game.spawn_unit(h, h_units[k], c + Vector2(-5.5 - (k % 4) * 1.4, -3.0 + (k / 4) * 1.5))
+			u.cmd_move(c + Vector2(2.0, 2.0), true)
+			if k < 8:
+				game.selection.append(u)
+				u.selected = true
+		for k in e_units.size():
+			var u = game.spawn_unit(e, e_units[k], c + Vector2(3.5 + (k % 4) * 1.4, -2.0 + (k / 4) * 1.5))
+			u.cmd_move(c + Vector2(-2.0, -1.0), true)
+		game.center_on(c, true)
+		game.events.append({"t": 1.2, "fn": func():
+			h.powers["himars"] = 1.0
+			game.fire_power(h, "himars", c + Vector2(4.0, 3.0))})
+	elif sc_id == 2:
+		game.zoom = 1.45
+		game.hud.tab = 2
+		for eb in [["s_ref", Vector2i(0, 0)], ["s_power", Vector2i(4, -1)], ["s_radar", Vector2i(-3, 3)], ["s_sam", Vector2i(2, 3)], ["s_sam", Vector2i(-2, -2)], ["s_tcoil", Vector2i(4, 3)]]:
+			var b = game.place_building(e, eb[0], Vector2i(int(c.x), int(c.y)) + eb[1], true)
+			if b != null: b.build_p = 1.0
+		for k in 6:
+			var u = game.spawn_unit(e, "s_flaktrk" if k % 2 == 0 else "s_ew", c + Vector2(-2.0 + k * 1.5, 1.5))
+			u.cmd_move(c, true)
+		for k in 4:
+			var u = game.spawn_unit(h, "a_ew" if k % 2 == 0 else "a_himars", c + Vector2(-6.0, -2.0 + k * 1.6))
+			u.cmd_move(c, true)
+		for k in 18:
+			var dtype: String = ["a_fpv", "a_fpv", "a_tb2"][k % 3]
+			var u = game.spawn_unit(h, dtype, c + Vector2(-9.0 - (k % 5) * 1.8, -6.0 + (k / 5) * 2.5))
+			u.cmd_move(c + Vector2(1.0, 1.0), true)
+		for k in 12:
+			var dtype: String = "s_shahed" if k % 2 == 0 else "s_lancet"
+			var u = game.spawn_unit(e, dtype, c + Vector2(8.0 + (k % 4) * 1.8, -5.0 + (k / 4) * 2.5))
+			u.cmd_move(c + Vector2(-4.0, -1.0), true)
+		game.center_on(c, true)
+		game.events.append({"t": 1.0, "fn": func():
+			h.powers["droneswarm"] = 1.0
+			game.fire_power(h, "droneswarm", c + Vector2(1.5, 1.5))})
+	elif sc_id == 3:
+		game.zoom = 1.38
+		game.hud.tab = 4
+		var wc: Vector2i = game.nearest_water(Vector2i(game.W / 2, game.H / 2), 45)
+		var nc := Vector2(wc) + Vector2(0.5, 0.5) if wc.x >= 0 else c
+		game.reveal(nc, 60.0)
+		var h_ships := ["a_cvn", "a_carrier", "a_destroyer", "a_destroyer", "a_destroyer", "a_seadrone", "a_seadrone", "a_seadrone"]
+		var e_ships := ["s_dread", "s_dread", "s_sub", "s_sub", "s_sub", "s_fastboat", "s_fastboat", "s_fastboat"]
+		for k in h_ships.size():
+			var sw: Vector2i = game.nearest_water(Vector2i(int(nc.x) - 5 - (k % 3) * 2, int(nc.y) - 3 + (k / 3) * 2), 20)
+			if sw.x >= 0:
+				var u = game.spawn_unit(h, h_ships[k], Vector2(sw) + Vector2(0.5, 0.5))
+				u.cmd_move(nc + Vector2(2, 0), true)
+		for k in e_ships.size():
+			var sw: Vector2i = game.nearest_water(Vector2i(int(nc.x) + 4 + (k % 3) * 2, int(nc.y) - 3 + (k / 3) * 2), 20)
+			if sw.x >= 0:
+				var u = game.spawn_unit(e, e_ships[k], Vector2(sw) + Vector2(0.5, 0.5))
+				u.cmd_move(nc + Vector2(-2, 0), true)
+		for k in 6:
+			var j = game.spawn_unit(h, "a_hornet" if k % 2 == 0 else "a_apache", nc + Vector2(-8.0 + k * 2.0, -4.0 + (k % 2) * 3.0))
+			j.cmd_move(nc + Vector2(3, 1), true)
+		game.center_on(nc, true)
+	elif sc_id == 4:
+		game.zoom = 1.38
+		for eb in [["s_cy", Vector2i(0, 0)], ["s_tech", Vector2i(4, 0)], ["s_nuke", Vector2i(0, 4)], ["s_fac", Vector2i(-4, 2)], ["s_ref", Vector2i(4, 4)], ["s_tcoil", Vector2i(-2, -2)], ["s_tcoil", Vector2i(3, -3)]]:
+			var b = game.place_building(e, eb[0], Vector2i(int(c.x), int(c.y)) + eb[1], true)
+			if b != null: b.build_p = 1.0
+		for k in 10:
+			var u = game.spawn_unit(e, "s_mammoth" if k % 2 == 0 else "s_tos", c + Vector2(-3.0 + (k % 4) * 2.2, -2.0 + (k / 4) * 2.2))
+			u.cmd_move(c + Vector2(-5.0, -3.0), true)
+		for k in 10:
+			var u = game.spawn_unit(h, "a_tank" if k % 2 == 0 else "a_beam", c + Vector2(-6.5 + (k % 4) * 1.5, 2.0 + (k / 4) * 1.5))
+			u.cmd_move(c, true)
+		game.center_on(c, true)
+		game.events.append({"t": 0.6, "fn": func():
+			game.fx.coins(c + Vector2(0, -1))
+			var EV = preload("res://scripts/events.gd")
+			game.world_ev.fire(EV.EVENTS[0], e)
+			h.powers["emp"] = 1.0
+			game.fire_power(h, "emp", c + Vector2(2.0, 2.0))})
+		game.events.append({"t": 1.6, "fn": func():
+			h.powers["storm"] = 1.0
+			game.fire_power(h, "storm", c + Vector2(-1.0, 1.0))})
+		game.events.append({"t": 2.4, "fn": func():
+			h.powers["nuke"] = 1.0
+			game.fire_power(h, "nuke", c + Vector2(1.0, 1.0))})

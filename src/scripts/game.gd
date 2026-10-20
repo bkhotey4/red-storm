@@ -57,6 +57,17 @@ var check_t := 0.0
 var place_id := ""
 var cmd_mode := ""
 var dragging := false
+# 移動畫面：右鍵拖曳（紅警 2 風格）、可選的左鍵拖曳、觸控板手勢、觸控雙指
+var rheld := false
+var rdrag := false
+var rpress := Vector2.ZERO
+var lpan := false
+var lpan_moved := false
+var lpress := Vector2.ZERO
+var touches := {}
+var pinch_d := 0.0
+var cam_moved := false      # 玩家是否已經成功移動過畫面（新手提示用）
+var tip_until := 0.0
 var drag_start := Vector2.ZERO
 var panning := false
 var hover = null
@@ -195,6 +206,12 @@ func start(s: Dictionary):
 	reveal_all_now()
 	Sfx.say("construction_options", 0.0)
 	Sfx.music("battle")
+	# 前 5 場遊戲在開局顯示操作提示（移動畫面後淡出）
+	var tc := int(G.settings.get("tips_count", 0))
+	if tc < 5 and not settings.get("auto", false):
+		tip_until = 90.0
+		G.settings["tips_count"] = tc + 1
+		G.save_settings()
 	message("指揮官，展開基地車 (選取後按 D 或雙擊) 開始建設基地！")
 
 func setup_players(s: Dictionary):
@@ -1771,6 +1788,7 @@ func update_camera(delta: float):
 			v.y += 1
 	if v != Vector2.ZERO:
 		cam.position += v.normalized() * spd * delta
+		cam_moved = true
 	clamp_cam()
 	cam.zoom = Vector2(zoom, zoom)
 	cam.offset = fx.shake_off() if fx != null else Vector2.ZERO
@@ -1879,6 +1897,10 @@ func _unhandled_input(ev: InputEvent):
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
 				left_press(mb)
+			elif lpan:
+				lpan = false
+				if not lpan_moved:
+					click_select(false, false)
 			elif dragging:
 				dragging = false
 				var cp := get_global_mouse_position()
@@ -1886,17 +1908,67 @@ func _unhandled_input(ev: InputEvent):
 					box_select(drag_start, cp, mb.shift_pressed)
 				else:
 					click_select(mb.shift_pressed, false)
-		elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
-			if place_id != "" or cmd_mode != "":
-				place_id = ""
-				cmd_mode = ""
-				return
-			context_order(mb.ctrl_pressed)
+		elif mb.button_index == MOUSE_BUTTON_RIGHT:
+			# 右鍵：放開時沒拖曳才算下指令；按住拖曳＝移動畫面
+			if mb.pressed:
+				rheld = true
+				rdrag = false
+				rpress = mb.position
+			elif rheld:
+				rheld = false
+				if rdrag:
+					return
+				if place_id != "" or cmd_mode != "":
+					place_id = ""
+					cmd_mode = ""
+					return
+				context_order(mb.ctrl_pressed)
 	elif ev is InputEventMouseMotion:
-		if panning:
-			cam.position -= (ev as InputEventMouseMotion).relative / zoom
+		var mm := ev as InputEventMouseMotion
+		# 放開按鍵的事件可能被側邊欄吃掉：以實際按鍵狀態為準
+		if rheld and not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+			rheld = false
+		if lpan and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+			lpan = false
+		if rheld and not rdrag and mm.position.distance_to(rpress) > 10.0:
+			rdrag = true
+		if lpan and not lpan_moved and mm.position.distance_to(lpress) > 8.0:
+			lpan_moved = true
+		if panning or (rheld and rdrag) or (lpan and lpan_moved):
+			pan_by(mm.relative)
+	elif ev is InputEventPanGesture:
+		# 觸控板雙指滑動
+		pan_by(-(ev as InputEventPanGesture).delta * 18.0)
+	elif ev is InputEventMagnifyGesture:
+		set_zoom(zoom * (ev as InputEventMagnifyGesture).factor)
+	elif ev is InputEventScreenTouch:
+		var st := ev as InputEventScreenTouch
+		if st.pressed:
+			touches[st.index] = st.position
+		else:
+			touches.erase(st.index)
+		pinch_d = 0.0
+	elif ev is InputEventScreenDrag:
+		# 觸控螢幕：雙指拖曳移動畫面、雙指開合縮放
+		var sd := ev as InputEventScreenDrag
+		touches[sd.index] = sd.position
+		if touches.size() >= 2:
+			dragging = false
+			lpan = false
+			pan_by(sd.relative / touches.size())
+			var ks: Array = touches.keys()
+			var d: float = (touches[ks[0]] as Vector2).distance_to(touches[ks[1]])
+			if pinch_d > 0.0 and d > 10.0:
+				set_zoom(zoom * d / pinch_d)
+			pinch_d = d
 	elif ev is InputEventKey and ev.pressed and not ev.echo:
 		key_press(ev as InputEventKey)
+
+func pan_by(screen_rel: Vector2):
+	cam.position -= screen_rel / zoom
+	clamp_cam()
+	if screen_rel.length() > 1.0:
+		cam_moved = true
 
 func set_zoom(z: float):
 	var before := get_global_mouse_position()
@@ -1944,6 +2016,11 @@ func left_press(mb: InputEventMouseButton):
 			return
 	if mb.double_click:
 		click_select(false, true)
+		return
+	if G.settings.get("left_pan", false) and not mb.shift_pressed:
+		lpan = true
+		lpan_moved = false
+		lpress = mb.position
 		return
 	dragging = true
 	drag_start = get_global_mouse_position()

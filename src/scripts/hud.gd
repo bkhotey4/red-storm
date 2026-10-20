@@ -755,6 +755,26 @@ func _draw_top():
 		ci.draw_rect(Rect2(8, cy, 3, 22), Color(0.4, 0.75, 1.0))
 		ci.draw_string(G.font_bold, Vector2(18, cy + 16), ct, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.9, 1.0))
 		y += 26.0
+	# 新手操作提示
+	if game.tip_until > 0.0 and game.time < game.tip_until:
+		var ta := clampf((game.tip_until - game.time) / 2.0, 0.0, 1.0)
+		if game.cam_moved and game.time > 8.0:
+			game.tip_until = minf(game.tip_until, game.time + 2.0)
+		var lines_t := [
+			"移動畫面：按住右鍵拖曳　・　方向鍵　・　滑鼠移到畫面邊緣　・　觸控板雙指滑動",
+			"選取：左鍵點選，或拖曳框選　　下指令：右鍵點地面／敵人　　縮放：滾輪",
+			"先選取基地車按 D 展開，再從右側建造欄蓋發電廠 → 精煉廠 → 兵營　　F1：完整說明",
+		]
+		var tw := 0.0
+		for l in lines_t:
+			tw = maxf(tw, G.font.get_string_size(l, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x)
+		var tx := (vs.x - SW) * 0.5 - tw * 0.5 - 18.0
+		var ty := 110.0
+		ci.draw_rect(Rect2(tx, ty, tw + 36.0, 30.0 + lines_t.size() * 26.0), Color(0.02, 0.05, 0.1, 0.82 * ta))
+		ci.draw_rect(Rect2(tx, ty, tw + 36.0, 3), Color(0.4, 0.75, 1.0, ta))
+		ci.draw_string(G.font_bold, Vector2(tx + 18, ty + 24), "新手提示", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.5, 0.85, 1.0, ta))
+		for i in lines_t.size():
+			ci.draw_string(G.font, Vector2(tx + 18, ty + 50 + i * 26), lines_t[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.95, 0.95, 0.92, ta))
 	# messages
 	for m in msgs:
 		var a := clampf(7.0 - m.t, 0.0, 1.0)
@@ -805,7 +825,7 @@ func _draw_top():
 				parts.append("%s x%d" % [k, counts[k]])
 			ci.draw_string(G.font, r.position + Vector2(10, 46), "、".join(parts), HORIZONTAL_ALIGNMENT_LEFT, pw - 20, 13, Color(0.85, 0.85, 0.85))
 	# hint bar
-	var hint := "左鍵:選取/框選　右鍵:移動/攻擊　A:攻擊移動　S:停止　F:技能　D:展開基地車　Ctrl+數字:編隊　H:回基地　空白:最近警報　N:閒置礦車　I:閒置單位　Tab:生產建築　滾輪:縮放"
+	var hint := "右鍵拖曳:移動畫面　左鍵:選取/框選　右鍵:移動/攻擊　A:攻擊移動　S:停止　F:技能　D:展開基地車　Ctrl+數字:編隊　H:回基地　空白:最近警報　N:閒置礦車　I:閒置單位　Tab:生產建築　滾輪:縮放"
 	ci.draw_rect(Rect2(0, vs.y - 22, vs.x - SW, 22), Color(0, 0, 0, 0.55))
 	ci.draw_string(G.font, Vector2(10, vs.y - 6), hint, HORIZONTAL_ALIGNMENT_LEFT, vs.x - SW - 20, 12, Color(0.75, 0.75, 0.72))
 	# placement tip
@@ -1006,6 +1026,11 @@ func toggle_pause_menu():
 		cb.button_pressed = G.settings.get("edge_scroll", true)
 		cb.toggled.connect(func(v): G.settings["edge_scroll"] = v; G.save_settings())
 		vb.add_child(cb)
+		var lp := CheckBox.new()
+		lp.text = "左鍵拖曳移動畫面（框選改用 Shift＋拖曳）"
+		lp.button_pressed = G.settings.get("left_pan", false)
+		lp.toggled.connect(func(v): G.settings["left_pan"] = v; G.save_settings())
+		vb.add_child(lp)
 		add_btn(vb, "投降（結束本局）", func(): surrender())
 		add_btn(vb, "返回主選單", func(): G.main.to_menu())
 		add_btn(vb, "離開遊戲", func(): G.main.quit_game())
