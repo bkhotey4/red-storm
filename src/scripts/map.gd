@@ -299,6 +299,26 @@ func generate(p: Dictionary):
 		cand = [Vector2i(int(W * 0.64), int(H * 0.52)), Vector2i(int(W * 0.14), int(H * 0.30)), Vector2i(int(W * 0.14), int(H * 0.72)), Vector2i(int(W * 0.70), int(H * 0.27))]
 	elif layout == "gulf":
 		cand = [Vector2i(int(W * 0.18), int(H * 0.22)), Vector2i(int(W * 0.80), int(H * 0.78)), Vector2i(int(W * 0.62), int(H * 0.15)), Vector2i(int(W * 0.30), int(H * 0.88))]
+	# 隨機出生點（遭遇戰）：由地圖種子決定，選單預覽與實際對戰一致
+	if p.get("shuffle", false) and not layout in ["strait", "gulf"]:
+		var sr := RandomNumberGenerator.new()
+		sr.seed = hash("start:%d" % int(p.get("seed", 1)))
+		var perm := [0, 1, 2, 3]
+		if layout in ["river", "coast"]:
+			# 河流/海岸地圖只有左上與右下兩角在陸地上，只交換雙方位置
+			if sr.randi() % 2 == 1:
+				perm = [1, 0, 2, 3]
+		else:
+			var opp := {0: 1, 1: 0, 2: 3, 3: 2}
+			var first: int = sr.randi() % 4
+			var rest := [0, 1, 2, 3].filter(func(i): return i != first and i != opp[first])
+			if sr.randi() % 2 == 1:
+				rest.reverse()
+			perm = [first, opp[first]] + rest
+		var shuffled := []
+		for i in perm:
+			shuffled.append(cand[i])
+		cand = shuffled
 	for k in nplayers:
 		starts.append(cand[k])
 	for s in starts:
@@ -361,6 +381,8 @@ func generate(p: Dictionary):
 					ore[idx(xx, yy)] = 0
 		oils.append(c)
 	make_towns()
+	if p.get("shuffle", false):
+		place_techs()
 	# trees
 	var th: Dictionary = THEMES[theme]
 	var tlist: Array = th.trees
@@ -556,6 +578,56 @@ func civ_at(x: int, y: int) -> bool:
 		if x >= tl.x - 1 and y >= tl.y - 1 and x <= tl.x + sz.x and y <= tl.y + sz.y:
 			return true
 	return false
+
+# 科技建築：放在雙方主出生點連線的垂直平分線上（到兩名主要玩家距離相等），找不到陸地就往中央收
+func place_techs():
+	var tr := RandomNumberGenerator.new()
+	tr.seed = rng.seed + 4242
+	var a := Vector2(starts[0])
+	var b := Vector2(starts[1])
+	var mid := (a + b) * 0.5
+	var dir := (b - a).orthogonal().normalized()
+	var fracs := [0.28, -0.28, 0.13]
+	var ids := ["tech_hosp", "tech_shop", "tech_air"]
+	# 隨機分配哪種科技建築放在哪個位置
+	for i in range(ids.size() - 1, 0, -1):
+		var j := tr.randi() % (i + 1)
+		var t = ids[i]
+		ids[i] = ids[j]
+		ids[j] = t
+	for k in ids.size():
+		var f: float = fracs[k]
+		while absf(f) > 0.05:
+			var c := mid + dir * f * W
+			var sz: Vector2i = Defs.BUILDINGS[ids[k]].size
+			var tl := find_tech_spot(Vector2i(int(c.x) - sz.x / 2, int(c.y) - sz.y / 2), sz, 4)
+			var crowded := false
+			for cv in civs:
+				if Defs.BUILDINGS[cv[0]].has("tech") and Vector2(cv[1]).distance_to(Vector2(tl)) < 9.0:
+					crowded = true
+			if tl.x >= 0 and not crowded:
+				civs.append([ids[k], tl, 0])
+				break
+			f *= 0.8
+
+func find_tech_spot(c: Vector2i, sz: Vector2i, maxr := 12) -> Vector2i:
+	for r in maxr:
+		for y in range(c.y - r, c.y + r + 1):
+			for x in range(c.x - r, c.x + r + 1):
+				if maxi(absi(x - c.x), absi(y - c.y)) != r:
+					continue
+				var ok := true
+				for yy in range(y - 1, y + sz.y + 1):
+					for xx in range(x - 1, x + sz.x + 1):
+						if not inb(xx, yy):
+							ok = false
+							continue
+						var tt := terrain[idx(xx, yy)]
+						if tt == T_WATER or tt == T_ROCK or ore[idx(xx, yy)] > 0 or elev[idx(xx, yy)] != elev[idx(x, y)]:
+							ok = false
+				if ok and not civ_at(x, y) and not civ_at(x + sz.x - 1, y + sz.y - 1) and not near_oil(x, y) and not near_start(x, y, 12.0):
+					return Vector2i(x, y)
+	return Vector2i(-1, -1)
 
 func make_towns():
 	var road_cells := []
@@ -899,7 +971,7 @@ func _draw():
 	var rim := Color(0, 0, 0, 0.5)
 	draw_polyline(PackedVector2Array([pts[0], pts[1], pts[2], pts[3], pts[0]]), rim, 3.0)
 
-func draw_plateaus(base_t: Texture2D, rock_t: Texture2D, node: CanvasItem = null, r: Rect2i = Rect2i(0, 0, 0, 0)):
+func draw_plateaus(base_t: Texture2D, rock_t: Texture2D, node = null, r: Rect2i = Rect2i(0, 0, 0, 0)):
 	if node == null:
 		node = self
 	if r.size.x == 0:
@@ -967,7 +1039,7 @@ func layer_weights(layer: int, noise_amt: float) -> PackedFloat32Array:
 	wts_cache[layer] = wts
 	return wts
 
-func draw_layer(layer: int, t: Texture2D, noise_amt: float, node: CanvasItem = null, r: Rect2i = Rect2i(0, 0, 0, 0), raised := true):
+func draw_layer(layer: int, t: Texture2D, noise_amt: float, node = null, r: Rect2i = Rect2i(0, 0, 0, 0), raised := true):
 	if node == null:
 		node = self
 	if r.size.x == 0:
@@ -1027,23 +1099,77 @@ func activate_chunks():
 				chunks[k].queue_redraw()
 				water_chunks[k].queue_redraw()
 
+# 地形批次繪製：把同一張貼圖的連續多邊形合併成一個 mesh。
+# 相容渲染器（含網頁版 WebGL）不會合併 draw_polygon，每塊地磚都是一次繪製呼叫，會拖垮效能。
+class MeshRec:
+	var runs: Array = []   # 每段：[texture, verts, colors, uvs]
+	var meshes: Array = [] # 繪製後須保留 mesh 參照，否則 RID 會被釋放
+
+	func _run(tex) -> Array:
+		if runs.is_empty() or runs[-1][0] != tex:
+			runs.append([tex, PackedVector2Array(), PackedColorArray(), PackedVector2Array()])
+		return runs[-1]
+
+	func draw_polygon(pts: PackedVector2Array, cols: PackedColorArray, uvs: PackedVector2Array = PackedVector2Array(), tex: Texture2D = null):
+		var r := _run(tex)
+		var v: PackedVector2Array = r[1]
+		var c: PackedColorArray = r[2]
+		var u: PackedVector2Array = r[3]
+		for i in range(1, pts.size() - 1):
+			for j in [0, i, i + 1]:
+				v.append(pts[j])
+				c.append(cols[j] if j < cols.size() else cols[0])
+				u.append(uvs[j] if j < uvs.size() else Vector2.ZERO)
+		r[1] = v
+		r[2] = c
+		r[3] = u
+
+	func draw_line(a: Vector2, b: Vector2, col: Color, w := 1.0):
+		var d := (b - a).normalized().orthogonal() * w * 0.5
+		draw_polygon(PackedVector2Array([a + d, b + d, b - d, a - d]), PackedColorArray([col, col, col, col]), PackedVector2Array(), null)
+
+	func flush(node: CanvasItem):
+		for r in runs:
+			var v: PackedVector2Array = r[1]
+			if v.is_empty():
+				continue
+			var arr := []
+			arr.resize(Mesh.ARRAY_MAX)
+			arr[Mesh.ARRAY_VERTEX] = v
+			arr[Mesh.ARRAY_COLOR] = r[2]
+			arr[Mesh.ARRAY_TEX_UV] = r[3]
+			var m := ArrayMesh.new()
+			m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+			meshes.append(m)
+			node.draw_mesh(m, r[0])
+		runs.clear()
+
+var chunk_meshes := {}
+var water_meshes := {}
+
 func _draw_chunk(node: CanvasItem, k: int):
 	if chunk_ready[k] == 0:
 		return
 	var th: Dictionary = THEMES[theme]
 	var r := chunk_rect(k)
-	draw_plateaus(G.tex(th.base), G.tex(th.rock), node, r)
-	draw_layer(T_ALT, G.tex(th.alt), 0.5, node, r)
-	draw_layer(T_DIRT, G.tex(th.dirt), 0.5, node, r)
-	draw_layer(T_ROAD, G.tex("road"), 0.15, node, r)
-	draw_layer(T_ROCK, G.tex(th.rock), 0.35, node, r)
+	var rec := MeshRec.new()
+	draw_plateaus(G.tex(th.base), G.tex(th.rock), rec, r)
+	draw_layer(T_ALT, G.tex(th.alt), 0.5, rec, r)
+	draw_layer(T_DIRT, G.tex(th.dirt), 0.5, rec, r)
+	draw_layer(T_ROAD, G.tex("road"), 0.15, rec, r)
+	draw_layer(T_ROCK, G.tex(th.rock), 0.35, rec, r)
+	rec.flush(node)
+	chunk_meshes[k] = rec
 
 func _draw_water_chunk(node: CanvasItem, k: int):
 	if chunk_ready[k] == 0:
 		return
 	var th: Dictionary = THEMES[theme]
 	var r := chunk_rect(k)
-	draw_layer(T_WATER, G.tex(th.water), 0.3, node, r, false)
+	var out: CanvasItem = node
+	var rec := MeshRec.new()
+	node = null
+	draw_layer(T_WATER, G.tex(th.water), 0.3, rec, r, false)
 	# foam along shores
 	var foam := G.tex("foam")
 	for y in range(r.position.y, r.end.y):
@@ -1059,7 +1185,10 @@ func _draw_water_chunk(node: CanvasItem, k: int):
 				pts.append(G.iso(v))
 				uvs.append(v * 0.5)
 			var a := 0.22
-			node.draw_polygon(pts, PackedColorArray([Color(1, 1, 1, a), Color(1, 1, 1, a), Color(1, 1, 1, a), Color(1, 1, 1, a)]), uvs, foam)
+			rec.draw_polygon(pts, PackedColorArray([Color(1, 1, 1, a), Color(1, 1, 1, a), Color(1, 1, 1, a), Color(1, 1, 1, a)]), uvs, foam)
+	rec.flush(out)
+	water_meshes[k] = rec
+
 
 func build_chunks():
 	for c in chunks:

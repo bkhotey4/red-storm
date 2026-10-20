@@ -5,8 +5,8 @@ const HW := 32.0   # half tile width in pixels
 const HH := 16.0   # half tile height
 const VERSION := "1.0"
 
-var font: SystemFont
-var font_bold: SystemFont
+var font: Font
+var font_bold: Font
 var game = null
 var main = null
 var settings := {
@@ -70,26 +70,36 @@ class Sheet:
 
 func _ready():
 	load_settings()
-	font = SystemFont.new()
-	font.font_names = PackedStringArray(["Microsoft JhengHei UI", "Microsoft JhengHei", "Microsoft YaHei UI", "Microsoft YaHei",
+	# 內嵌思源黑體（Noto Sans TC，OFL 授權）：網頁版、Mac、Steam Deck 都沒有微軟正黑體
+	var sys := SystemFont.new()
+	sys.font_names = PackedStringArray(["Microsoft JhengHei UI", "Microsoft JhengHei", "Microsoft YaHei UI", "Microsoft YaHei",
 		"PingFang TC", "Noto Sans CJK TC", "Noto Sans CJK SC", "Noto Sans TC", "sans-serif"])
-	font.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
-	font.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_DISABLED
-	# 網頁版沒有系統中文字型：內建 Noto Sans TC（只含遊戲用到的字）當備援
-	var cjk = load("res://fonts/NotoSansTC-RS.ttf")
-	if cjk:
-		font.fallbacks = [cjk]
-	font_bold = font.duplicate()
-	font_bold.font_weight = 700
-	if cjk:
-		var cjk_bold := FontVariation.new()
-		cjk_bold.base_font = cjk
-		cjk_bold.variation_opentype = {"wght": 700}
-		font_bold.fallbacks = [cjk_bold]
+	sys.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
+	sys.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_DISABLED
+	var ff = load("res://fonts/NotoSansTC.ttf") if ResourceLoader.exists("res://fonts/NotoSansTC.ttf") else null
+	if ff is FontFile:
+		ff.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
+		ff.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_DISABLED
+		var wght := TextServerManager.get_primary_interface().name_to_tag("wght")
+		var reg := FontVariation.new()
+		reg.base_font = ff
+		reg.variation_opentype = {wght: 450}
+		reg.fallbacks = [sys]
+		var bold := FontVariation.new()
+		bold.base_font = ff
+		bold.variation_opentype = {wght: 700}
+		bold.fallbacks = [sys]
+		font = reg
+		font_bold = bold
+	else:
+		font = sys
+		var sb: SystemFont = sys.duplicate()
+		sb.font_weight = 700
+		font_bold = sb
 	ThemeDB.fallback_font = font
 	ThemeDB.fallback_font_size = 15
 	var icon := load_image("res://textures/icon.png")
-	if icon:
+	if icon and not OS.has_feature("web"):
 		DisplayServer.set_icon(icon)
 
 func iso(p: Vector2) -> Vector2:

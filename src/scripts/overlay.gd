@@ -48,8 +48,27 @@ func bld_box(b, col: Color):
 	bar(Vector2(b.position.x, top - 8), 22.0 * (b.size.x + b.size.y), b.hp / b.max_hp, 5 * (b.size.x + b.size.y))
 
 func _draw():
+	var _t := Time.get_ticks_usec()
+	_draw_impl()
+	G.game._pf("overlay", _t)
+
+func _draw_impl():
 	var human = game.human
 	var t: float = game.time
+	if game.gmode != null:
+		game.gmode.draw_world(self)
+	# 戰場委託「斬首行動」目標準星
+	if game.contracts != null and game.contracts.active() and game.contracts.cur.type == "snipe":
+		var tg = game.contracts.cur.target
+		if is_instance_valid(tg) and not tg.dead:
+			var cp: Vector2 = tg.position + Vector2(0, -20)
+			var rr := 30.0 + 4.0 * sin(t * 5.0)
+			var cc := Color(1.0, 0.3, 0.2, 0.85)
+			draw_arc(cp, rr, 0, TAU, 32, cc, 2.5)
+			for k in 4:
+				var a := PI * 0.5 * k
+				draw_line(cp + Vector2.from_angle(a) * (rr - 10.0), cp + Vector2.from_angle(a) * (rr + 10.0), cc, 2.5)
+			draw_string(G.font_bold, cp + Vector2(-40, -rr - 8), "委託目標", HORIZONTAL_ALIGNMENT_CENTER, 80, 13, cc)
 	# markers
 	for m in game.markers:
 		var f: float = m.t / 0.8

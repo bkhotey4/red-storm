@@ -58,6 +58,21 @@ func _ready():
 				var mp: Dictionary = s["map"].duplicate()
 				mp["size"] = int(a.substr(7))
 				s["map"] = mp
+			if a.begins_with("--diff="):
+				s["difficulty"] = int(a.substr(7))
+			if a.begins_with("--weather="):
+				G.settings["debug_weather"] = a.substr(10)
+			if a.begins_with("--muts="):
+				s["muts"] = Array(a.substr(7).split(","))
+			if a == "--daily":
+				var dsd: Dictionary = MenuS.daily_settings(MenuS.today_code())
+				for k in dsd:
+					s[k] = dsd[k]
+				print("  DAILY ", dsd.country, " vs ", dsd.enemy_country, " map=", dsd.map.name, " diff=", dsd.difficulty, " mode=", dsd["mode"], " muts=", dsd.muts)
+			if a.begins_with("--persona="):
+				G.settings["debug_persona"] = a.substr(10)
+			if a.begins_with("--mode="):
+				s["mode"] = a.substr(7)
 			if a == "--ffa":
 				s["ai_allied"] = false
 			if a == "--rectest":
@@ -117,6 +132,167 @@ func _ready():
 				load_game(2)
 				print("  LOAD units=", game.units.size(), " blds=", game.buildings.size(), " money=", int(game.human.money), " time=", game.time, " explored=", game.explored.count(1), " mission=", game.mission != null)
 				auto_quit = game.time + 120.0})
+		if args.has("--startstest"):
+			for b in game.buildings:
+				if b.def.has("tech"):
+					print("  TECH ", b.type_id, " at ", b.cell)
+			print("  STARTS layout=", game.map.layout, " W=", game.W, " human=", game.human.start_cell, " enemy=", game.players[1].start_cell)
+			get_tree().quit()
+			return
+		if G.settings.has("debug_weather") and game.weather != null:
+			game.weather.cur = str(G.settings.debug_weather)
+			game.weather.fade = 1.0
+			game.weather.until = 99999.0
+			game.events.append({"t": 3.0, "fn": func():
+				var tk = game.units.filter(func(u): return u.player == game.human and u.ukind == "veh")[0]
+				var arty := 0.0
+				var w = game.weather
+				print("  WEATHER ", w.cur, " ground=", w.speed_mult(tk), " range(5.5)=", w.range_mult(5.5), " range(12)=", w.range_mult(12.0), " status=", w.status_text())})
+		for a in args:
+			if a.begins_with("--perfoff="):
+				var offs := a.substr(10).split(",")
+				game.events.append({"t": 2.0, "fn": func():
+					for c in game.objects.get_children():
+						if "props" in offs and c.get_script() != null and c.get_script().resource_path.ends_with("prop.gd"):
+							c.visible = false
+					if "map" in offs:
+						game.map.visible = false
+						game.map.water_layer.visible = false
+					if "deco" in offs:
+						game.map.deco_layer.visible = false
+						game.map.ore_layer.visible = false
+					if "hud" in offs:
+						game.hud.visible = false
+						game.hud.side.visible = false
+						game.hud.top.visible = false
+					if "shroud" in offs:
+						game.shroud.visible = false})
+		if args.has("--perflog"):
+			game.events.append({"t": 3.0, "fn": func():
+				var cnt := {}
+				var stack: Array = [game]
+				while not stack.is_empty():
+					var n: Node = stack.pop_back()
+					var k: String = n.get_script().resource_path.get_file() if n.get_script() != null else n.get_class()
+					cnt[k] = int(cnt.get(k, 0)) + 1
+					stack.append_array(n.get_children())
+				print("  NODES ", cnt)
+				print("  map chunks=", game.map.chunks.size(), " trees=", game.map.trees.size(), " rocks=", game.map.rocks.size())})
+
+			for k in 6:
+				game.events.append({"t": 5.0 + k * 5.0, "fn": func():
+					print("  PERF t=%d fps=%d proc=%.1fms draws=%d objs=%d" % [int(game.time), Engine.get_frames_per_second(), Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+						Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME), Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)])
+					var ks: Array = game.prof.keys()
+					var parts := []
+					for kk in ks:
+						parts.append("%s=%.1f" % [kk, float(game.prof[kk]) / 1000.0])
+					print("     ms: ", " ".join(parts), "  units=", game.units.size(), " zoom=", game.zoom)})
+		if args.has("--techshot"):
+			game.events.append({"t": 2.0, "fn": func():
+				var techs: Array = game.buildings.filter(func(b): return b.def.has("tech"))
+				techs.sort_custom(func(a, b): return a.def.tech < b.def.tech)
+				var air = techs.filter(func(b): return b.def.tech == "air")[0]
+				game.reveal(air.pos, 14.0)
+				game.center_on(air.pos)
+				for b in techs:
+					if b.def.tech != "air" and b.pos.distance_to(air.pos) < 25.0:
+						game.reveal(b.pos, 6.0)
+				var eng = game.spawn_unit(game.human, "a_eng" if game.human.faction == "allies" else "s_eng", air.pos)
+				game.engineer_enter(eng, air)
+				game.contracts.offer("kills")
+				game.events.append({"t": game.time + 1.0, "fn": func(): print("  AIRVIS visible=", air.visible, " owner=", air.player.name)})})
+		if args.has("--contracttest"):
+			var C = game.contracts
+			game.ais = game.ais.filter(func(a): return a.p != game.human)
+			game.events.append({"t": 5.0, "fn": func():
+				var c := Vector2(game.human.start_cell) + Vector2(4, 4)
+				C.offer("kills")
+				C.cur.need = 3
+				for k in 3:
+					var e = game.spawn_unit(game.players[1], "s_con" if game.players[1].faction == "soviet" else "a_gi", c + Vector2(k * 0.5, 0))
+					e.last_attacker = game.units.filter(func(u): return u.player == game.human)[0]
+					e.take_damage(1e6, e.last_attacker, "he")})
+			game.events.append({"t": 8.0, "fn": func():
+				C.offer("tech")
+				var tb = null
+				for b in game.buildings.duplicate():
+					if b.def.has("tech"):
+						tb = b
+						var eng = game.spawn_unit(game.human, "a_eng" if game.human.faction == "allies" else "s_eng", b.pos)
+						game.engineer_enter(eng, b)
+				var gi = game.spawn_unit(game.human, "a_gi" if game.human.faction == "allies" else "s_con", Vector2(game.human.start_cell) + Vector2(3, 3))
+				gi.hp = 20.0
+				game.events.append({"t": game.time + 5.0, "fn": func():
+					print("  TECHTEST owner=", tb.player.name, " gi_hp=", int(gi.hp), "/", int(gi.max_hp), " powers=", game.human.powers.keys())})})
+			game.events.append({"t": 15.0, "fn": func():
+				C.offer("hold")
+				C.cur.until = game.time + 3.0})
+			game.events.append({"t": 20.0, "fn": func():
+				C.offer("snipe")
+				print("  SNIPE target=", C.cur.target.def.name)
+				C.cur.target.take_damage(1e6, null, "he")})
+			game.events.append({"t": 24.0, "fn": func():
+				print("  CONTRACTS done=", C.done, " failed=", C.failed, " money=", int(game.human.money))})
+		if args.has("--repeattest"):
+			var inf: String = "a_gi" if game.human.faction == "allies" else "s_con"
+			game.events.append({"t": 100.0, "fn": func():
+				game.human.money += 5000
+				game.human.repeat[inf] = true
+				game.human.enqueue(inf)
+				print("  REPEAT on, count=", game.human.count_type(inf))})
+			game.events.append({"t": 160.0, "fn": func():
+				print("  REPEAT after 60s count=", game.human.count_type(inf), " queued=", game.human.queued_count(inf))})
+		if args.has("--abilitytest"):
+			game.events.append({"t": 3.0, "fn": func():
+				var c := Vector2(game.W, game.H) * 0.5
+				var en = game.players[1]
+				var dug_gi = game.spawn_unit(game.human, "a_gi", c)
+				var open_gi = game.spawn_unit(game.human, "a_gi", c + Vector2(0, 1.0))
+				var tk = game.spawn_unit(game.human, "a_tank", c + Vector2(-1.0, 0.5))
+				dug_gi.use_ability()
+				tk.use_ability()
+				print("  ABIL dug=", dug_gi.dug, " range=", dug_gi.weapon_range(), " smoke=", tk.ability_status(), " again=", tk.use_ability())
+				game.human.finish_upgrade("up_inf_armor")
+				for k in 4:
+					game.spawn_unit(en, "s_con", c + Vector2(4.0, -1.0 + k * 0.6))
+				game.events.append({"t": game.time + 12.0, "fn": func():
+					print("  ABIL after 12s dugHP=", int(dug_gi.hp) if is_instance_valid(dug_gi) else -1, " openHP=", int(open_gi.hp) if is_instance_valid(open_gi) else -1, " tankHP=", int(tk.hp) if is_instance_valid(tk) else -1, " status=", tk.ability_status() if is_instance_valid(tk) else "")})})
+		if args.has("--upshot"):
+			game.events.append({"t": 4.0, "fn": func():
+				game.ais = game.ais.filter(func(a): return a.p != game.human)
+				var sc := Vector2(game.human.start_cell) + Vector2(3.5, 6.5)
+				game.human.finish_upgrade("up_inf_armor")
+				game.human.finish_upgrade("up_mining")
+				game.human.money += 3000
+				game.human.enqueue("up_veh_weapon")
+				game.hud.tab = 5
+				for k in 4:
+					var g = game.spawn_unit(game.human, "a_gi" if game.human.faction == "allies" else "s_con", sc + Vector2(k * 0.9, 0))
+					g.use_ability()
+					game.selection.append(g)
+					g.selected = true
+				var tk = game.spawn_unit(game.human, "a_tank" if game.human.faction == "allies" else "s_tank", sc + Vector2(1.5, 2.0))
+				tk.use_ability()
+				game.center_on(sc)})
+		if args.has("--hillshot"):
+			game.events.append({"t": 2.0, "fn": func():
+				if game.gmode != null and game.gmode.is_koth():
+					game.reveal(game.gmode.hill, 12.0)
+					game.center_on(game.gmode.hill)
+					print("  HILLSHOT hill=", game.gmode.hill, " map=", game.W, "x", game.H)})
+			game.events.append({"t": 190.0, "fn": func():
+				if game.gmode != null:
+					game.center_on(game.gmode.hill)})
+		if args.has("--endshot"):
+			game.events.append({"t": 240.0, "fn": func():
+				game.mvp = {"name": "灰狼坦克", "kills": 7, "rank": 2}
+				auto_quit = -1.0
+				game.end_game(true)
+				await get_tree().create_timer(1.0).timeout
+				await RenderingServer.frame_post_draw
+				get_viewport().get_texture().get_image().save_png(shot_dir + "/end.png")
+				get_tree().quit()})
 		if args.has("--diploshot"):
 			game.events.append({"t": 3.0, "fn": func():
 				game.human.proposal[1] = "ally"
@@ -169,6 +345,9 @@ func _ready():
 	elif args.has("--menushot"):
 		to_menu()
 		shot_dir = "/tmp/shots"
+		for a in args:
+			if a.begins_with("--shots="):
+				shot_dir = a.substr(8)
 		if args.has("--recshot"):
 			var RecS = preload("res://scripts/records.gd")
 			var r: Dictionary = RecS.get_rec()
@@ -180,6 +359,8 @@ func _ready():
 				menu.bg_style = int(a.substr(5))
 				menu.parade.clear()
 				menu.setup_parade()
+		if args.has("--dailyshot"):
+			menu.show_daily()
 		if args.has("--flagsel"):
 			menu.opts.country.select(9)
 			menu._update_country_desc()
@@ -314,6 +495,44 @@ func start_game(s: Dictionary):
 
 func MapS_index(s: Dictionary) -> int:
 	return preload("res://scripts/map.gd").PRESETS.find(s.get("map"))
+
+# 離開遊戲：桌面版直接關閉；網頁版嘗試關閉分頁，被瀏覽器擋下時顯示提示畫面
+func quit_game():
+	if not OS.has_feature("web"):
+		get_tree().quit()
+		return
+	JavaScriptBridge.eval("window.close()", true)
+	if game != null:
+		game.queue_free()
+		game = null
+		G.game = null
+	if menu != null:
+		menu.queue_free()
+		menu = null
+	Sfx.stop_all()
+	var bye := ColorRect.new()
+	bye.color = Color(0.03, 0.03, 0.04)
+	bye.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(bye)
+	var cc := CenterContainer.new()
+	cc.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bye.add_child(cc)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 18)
+	cc.add_child(vb)
+	var lb := Label.new()
+	lb.text = "已離開遊戲，可以直接關閉這個瀏覽器分頁。
+感謝遊玩《紅色風暴》！"
+	lb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lb.add_theme_font_override("font", G.font_bold)
+	lb.add_theme_font_size_override("font_size", 26)
+	lb.add_theme_color_override("font_color", Color(1, 0.85, 0.4))
+	vb.add_child(lb)
+	var back := Button.new()
+	back.text = "回到主選單"
+	back.custom_minimum_size = Vector2(240, 48)
+	back.pressed.connect(func(): bye.queue_free(); to_menu())
+	vb.add_child(back)
 
 func restart_game():
 	start_game(last_settings)

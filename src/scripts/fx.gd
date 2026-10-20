@@ -206,6 +206,13 @@ func smoke(world: Vector2, z: float, fire := false):
 		glows.append({"p": sp + Vector2(0, 6), "v": Vector2(0, -20), "s0": 18.0, "s1": 6.0, "c0": Color(1.0, 0.5, 0.1, 0.9),
 			"c1": Color(0.8, 0.2, 0.0, 0.0), "t": 0.0, "d": 0.6, "tex": t_glow})
 
+# 載具煙霧彈：大片白色煙幕
+func smoke_screen(world: Vector2):
+	var sp := S(world, 4.0) + Vector2(randf_range(-26, 26), randf_range(-12, 12))
+	var v := randf_range(0.82, 0.95)
+	parts.append({"p": sp, "v": Vector2(randf_range(-8, 8), randf_range(-14, -6)), "s0": 22.0, "s1": 70.0,
+		"c0": Color(v, v, v, 0.8), "c1": Color(v, v, v, 0.0), "t": 0.0, "d": 2.2, "tex": t_smoke, "g": 0.0})
+
 func steam(world: Vector2, z: float):
 	var sp := S(world, z)
 	parts.append({"p": sp, "v": Vector2(randf_range(4, 10), randf_range(-26, -16)), "s0": 8.0, "s1": 34.0,
@@ -404,6 +411,11 @@ func proj_screen(pr: Dictionary) -> Vector2:
 	return S(w, z)
 
 func _draw():
+	var _t := Time.get_ticks_usec()
+	_draw_impl()
+	G.game._pf("fx_draw", _t)
+
+func _draw_impl():
 	for a in anims:
 		if a.t < 0.0:
 			continue

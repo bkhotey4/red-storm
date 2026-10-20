@@ -45,7 +45,7 @@ static func save_game(game, n: int) -> bool:
 			"money": p.money, "powers": p.powers, "alive": p.alive, "stats": p.stats,
 			"relations": p.relations, "allies": p.allies, "ceasefire": p.ceasefire, "proposal": p.proposal,
 			"sanctioned_until": p.sanctioned_until, "energy_cut_until": p.energy_cut_until, "sabotage_until": p.sabotage_until,
-			"vet_bonus": p.vet_bonus, "queues": p.queues, "ready": p.ready, "country": p.country, "faction": p.faction, "team": p.team,
+			"vet_bonus": p.vet_bonus, "upgrades": p.upgrades, "queues": p.queues, "ready": p.ready, "country": p.country, "faction": p.faction, "team": p.team,
 		})
 	for b in game.buildings:
 		if b.dead:
@@ -60,6 +60,10 @@ static func save_game(game, n: int) -> bool:
 			continue
 		d.units.append({"id": u.id, "t": u.type_id, "p": u.player.index, "x": u.pos.x, "y": u.pos.y, "hp": u.hp, "f": u.facing,
 			"rank": u.rank, "kills": u.kills, "cargo": u.cargo, "ammo": u.ammo, "alt": u.alt, "landed": u.landed, "harv": u.def.get("harvester", false)})
+	if game.gmode != null:
+		d["gmode"] = game.gmode.save_state()
+	if game.weather != null:
+		d["weather"] = game.weather.save_state()
 	if game.mission != null:
 		d.mission = {"id": game.mission.id, "spy_hits": game.mission.spy_hits, "sanction_fired": game.mission.sanction_fired, "waves": game.mission.waves, "wave_t": game.mission.wave_t}
 	var f := FileAccess.open(slot_path(n), FileAccess.WRITE)
@@ -142,7 +146,10 @@ static func apply(game, d: Dictionary):
 			for k in src.keys():
 				dst[int(k)] = src[k]
 			p.set(nm, dst)
-		p.queues = {"building": [], "defense": [], "infantry": [], "vehicle": []}
+		p.upgrades = {}
+		for k in q.get("upgrades", {}).keys():
+			p.upgrades[str(k)] = true
+		p.queues = {"building": [], "defense": [], "infantry": [], "vehicle": [], "upgrade": []}
 		for cat in q.get("queues", {}).keys():
 			for it in q.queues[cat]:
 				p.queues[cat].append({"id": str(it.id), "progress": float(it.progress), "spent": float(it.spent), "hold": false})
@@ -199,6 +206,10 @@ static func apply(game, d: Dictionary):
 		game.mission.sanction_fired = bool(d.mission.get("sanction_fired", false))
 		game.mission.waves = int(d.mission.get("waves", 0))
 		game.mission.wave_t = float(d.mission.get("wave_t", 0.0))
+	if game.weather != null and d.has("weather") and d.weather is Dictionary:
+		game.weather.load_state(d.weather)
+	if game.gmode != null and d.has("gmode") and d.gmode is Dictionary:
+		game.gmode.load_state(d.gmode)
 	# AI 重新整理
 	for ai in game.ais:
 		ai.water_ok = -1

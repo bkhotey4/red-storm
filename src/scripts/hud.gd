@@ -3,8 +3,8 @@ const FlagS = preload("res://scripts/flags.gd")
 # 介面：右側建造欄、雷達、資金電力、訊息、選單
 
 const SW := 300.0
-const TABS := ["building", "defense", "infantry", "vehicle", "naval"]
-const TAB_NAMES := ["建築", "防禦", "步兵", "載具", "海軍"]
+const TABS := ["building", "defense", "infantry", "vehicle", "naval", "upgrade"]
+const TAB_NAMES := ["建築", "防禦", "步兵", "載具", "海軍", "升級"]
 const CW := 134.0
 const CH := 98.0
 const MMH := 160.0
@@ -13,7 +13,7 @@ var game
 var side: Control
 var top: Control
 var tab := 0
-var scroll := [0, 0, 0, 0, 0]
+var scroll := [0, 0, 0, 0, 0, 0]
 var msgs: Array = []
 var pings: Array = []
 var mm_img: Image
@@ -41,7 +41,10 @@ func setup(g):
 	top = Control.new()
 	top.set_anchors_preset(Control.PRESET_FULL_RECT)
 	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	top.draw.connect(_draw_top)
+	top.draw.connect(func():
+		var _t := Time.get_ticks_usec()
+		_draw_top()
+		game._pf("hud_top", _t))
 	add_child(top)
 	side = Control.new()
 	side.anchor_left = 1.0
@@ -52,7 +55,10 @@ func setup(g):
 	side.offset_right = 0
 	side.mouse_filter = Control.MOUSE_FILTER_STOP
 	side.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
-	side.draw.connect(_draw_side)
+	side.draw.connect(func():
+		var _t := Time.get_ticks_usec()
+		_draw_side()
+		game._pf("hud_side", _t))
 	side.gui_input.connect(_side_input)
 	side.mouse_exited.connect(func(): hover_item = ""; hover_btn = "")
 	add_child(side)
@@ -280,7 +286,7 @@ func _draw_side():
 	ci.draw_rect(Rect2(pb.position.x, pb.end.y - prod_h, pb.size.x, prod_h), pc)
 	ci.draw_line(Vector2(pb.position.x - 3, pb.end.y - use_h), Vector2(pb.end.x + 3, pb.end.y - use_h), Color(1, 1, 1), 2.0)
 	# tabs
-	for i in 5:
+	for i in TABS.size():
 		var r := tab_rect(i)
 		var active := i == tab
 		var has_ready := false
@@ -293,7 +299,7 @@ func _draw_side():
 		var col := Color(1, 1, 1) if active else Color(0.75, 0.75, 0.75)
 		if not tab_enabled(i):
 			col = Color(0.4, 0.4, 0.4)
-		ci.draw_string(G.font_bold, Vector2(r.position.x, r.position.y + 21), TAB_NAMES[i], HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 16, col)
+		ci.draw_string(G.font_bold, Vector2(r.position.x, r.position.y + 21), TAB_NAMES[i], HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 15, col)
 	# cameos
 	var items := tab_items(tab)
 	var gr := grid_rect()
@@ -326,7 +332,7 @@ func _draw_side():
 		draw_tooltip(hover_item)
 
 func tab_rect(i: int) -> Rect2:
-	var tw := (SW - 36 - 8) / 5.0
+	var tw := (SW - 36 - 10) / float(TABS.size())
 	return Rect2(18 + i * (tw + 2), 44 + MMH + 12, tw, 30)
 
 func power_rows() -> int:
@@ -368,6 +374,8 @@ func tab_enabled(i: int) -> bool:
 			return human.has_role("fac") or human.has_role("airfield")
 		4:
 			return human.has_role("yard")
+		5:
+			return human.has_role("radar")
 	return false
 
 func tab_items(i: int) -> Array:
@@ -405,8 +413,20 @@ func draw_cameo(ci: CanvasItem, r: Rect2, id: String):
 		if def.faction == "soviet":
 			c = Color(0.3, 0.2, 0.18).lerp(Color(0.08, 0.06, 0.06), i / 8.0)
 		ci.draw_rect(Rect2(r.position.x, r.position.y + r.size.y * i / 8.0, r.size.x, r.size.y / 8.0 + 1), c)
-	var cam = G.cameo(id)
-	if cam != null:
+	var cam = G.cameo(id) if def.get("cat", "") != "upgrade" else null
+	if def.get("cat", "") == "upgrade":
+		# 科技升級：以大字圖示呈現
+		var ic := r.get_center() + Vector2(0, -6)
+		ci.draw_circle(ic, 30.0, Color(accent.r, accent.g, accent.b, 0.18))
+		ci.draw_arc(ic, 30.0, 0, TAU, 32, Color(accent.r, accent.g, accent.b, 0.7), 2.0)
+		var done: bool = human.has_up(id)
+		if done:
+			ci.draw_rect(r, Color(0, 0.25, 0.05, 0.55))
+		ci.draw_string(G.font_bold, Vector2(r.position.x, ic.y + 13), str(def.icon), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 34, Color(0.55, 0.85, 0.55, 0.6) if done else Color(1, 0.9, 0.55))
+		if done:
+			ci.draw_rect(Rect2(r.position.x, r.end.y - 38, r.size.x, 20), Color(0, 0, 0, 0.5))
+			ci.draw_string(G.font_bold, Vector2(r.position.x, r.end.y - 23), "✔ 已完成", HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 14, Color(0.5, 1, 0.5))
+	elif cam != null:
 		var dst := Rect2(r.position + Vector2(2, 0), Vector2(r.size.x - 4, (r.size.x - 4) * 200.0 / 272.0))
 		ci.draw_texture_rect(cam[0], dst, false)
 		if cam[1] != null:
@@ -423,10 +443,12 @@ func draw_cameo(ci: CanvasItem, r: Rect2, id: String):
 	ci.draw_rect(Rect2(r.end.x - 52, r.position.y, 52, 16), Color(0, 0, 0, 0.45))
 	ci.draw_string(G.font_bold, Vector2(r.position.x, r.position.y + 13), "$%d" % int(human.cost_of(id)), HORIZONTAL_ALIGNMENT_RIGHT, r.size.x - 4, 12, Color(1, 0.85, 0.3))
 	var prog: float = human.progress_of(id)
-	if not ok and not is_ready and prog < 0.0:
+	if not ok and not is_ready and prog < 0.0 and not human.has_up(id):
 		ci.draw_rect(r, Color(0, 0, 0, 0.62))
 		if missing != "":
 			ci.draw_string(G.font, Vector2(r.position.x, r.position.y + r.size.y * 0.5 + 4), "需要" + missing, HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 12, Color(1, 0.5, 0.4))
+		elif human.has_up(id):
+			pass
 		elif def.has("limit") and human.count_type(id) >= int(def.limit):
 			ci.draw_string(G.font, Vector2(r.position.x, r.position.y + r.size.y * 0.5 + 4), "已達上限", HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 12, Color(1, 0.7, 0.4))
 	if prog >= 0.0:
@@ -446,6 +468,9 @@ func draw_cameo(ci: CanvasItem, r: Rect2, id: String):
 		var a := 0.6 + 0.4 * sin(noise_t * 8.0)
 		ci.draw_rect(r, Color(1, 0.85, 0.2, 0.18 * a))
 		ci.draw_string(G.font_bold, Vector2(r.position.x, r.position.y + r.size.y * 0.5 + 2), "就緒", HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 18, Color(1, 0.9, 0.3, a))
+	if human.repeat.has(id):
+		ci.draw_rect(Rect2(r.end.x - 22, r.end.y - 38, 20, 18), Color(0.1, 0.35, 0.15, 0.85))
+		ci.draw_string(G.font_bold, Vector2(r.end.x - 22, r.end.y - 23), "∞", HORIZONTAL_ALIGNMENT_CENTER, 20, 16, Color(0.6, 1, 0.6))
 	var qn: int = human.queued_count(id)
 	if qn > 1:
 		ci.draw_string(G.font_bold, Vector2(r.position.x + 4, r.position.y + 14), "x%d" % qn, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.6, 1, 0.6))
@@ -474,6 +499,8 @@ func draw_tooltip(id: String):
 	if miss != "":
 		lines.append("需要：" + miss)
 	lines.append("左鍵：建造　右鍵：取消")
+	if Defs.UNITS.has(id):
+		lines.append("Shift：排 5 個　Ctrl：循環生產")
 	var w := 210.0
 	var h := 20.0 * lines.size() + 10
 	var mp := side.get_local_mouse_position()
@@ -543,7 +570,7 @@ func _side_input(ev: InputEvent):
 					game.command_move(list, mm_to_world(lp))
 					Sfx.play("radio", -10.0)
 			return
-		for i in 5:
+		for i in TABS.size():
 			if tab_rect(i).has_point(lp):
 				tab = i
 				Sfx.play("click", -8.0)
@@ -555,14 +582,43 @@ func _side_input(ev: InputEvent):
 		var id := item_at(lp)
 		if id != "":
 			if mb.button_index == MOUSE_BUTTON_LEFT:
-				click_item(id)
+				if mb.ctrl_pressed:
+					toggle_repeat(id)
+				elif mb.shift_pressed:
+					for k in 5:
+						click_item(id, k > 0)
+				else:
+					click_item(id)
 			elif mb.button_index == MOUSE_BUTTON_RIGHT:
+				if game.human.repeat.has(id):
+					game.human.repeat.erase(id)
+					game.message("%s 循環生產已取消" % Defs.get_def(id).name)
 				if game.human.cancel(id):
 					Sfx.play("click", -6.0)
 					if game.place_id == id:
 						game.place_id = ""
 
-func click_item(id: String):
+func toggle_repeat(id: String):
+	var human = game.human
+	var def: Dictionary = Defs.get_def(id)
+	var cat: String = human.queue_cat(def)
+	if cat == "building" or cat == "defense" or cat == "upgrade":
+		game.message("只有單位可以循環生產")
+		return
+	if human.repeat.has(id):
+		human.repeat.erase(id)
+		game.message("%s 循環生產：關閉" % def.name)
+	elif human.can_build(id):
+		human.repeat[id] = true
+		if human.queued_count(id) == 0:
+			human.enqueue(id)
+		game.message("%s 循環生產：開啟（右鍵取消）" % def.name)
+	else:
+		click_item(id)
+		return
+	Sfx.play("click", -6.0)
+
+func click_item(id: String, quiet := false):
 	var human = game.human
 	var def: Dictionary = Defs.get_def(id)
 	var cat: String = human.queue_cat(def)
@@ -575,7 +631,7 @@ func click_item(id: String):
 			Sfx.play("click", -6.0)
 			if cat == "building" or cat == "defense":
 				pass
-		else:
+		elif not quiet:
 			game.message("該生產線正忙碌中")
 	else:
 		var miss: String = human.missing_req(id)
@@ -614,6 +670,12 @@ func press_button(id: String):
 func _draw_top():
 	var ci := top
 	var vs := top.size
+	if game.weather != null:
+		game.weather.draw_screen(ci, vs, vs.x - SW, noise_t)
+		var wt: String = game.weather.status_text()
+		if wt != "":
+			ci.draw_rect(Rect2(vs.x - SW - 268, 8, 258, 22), Color(0, 0, 0, 0.45))
+			ci.draw_string(G.font_bold, Vector2(vs.x - SW - 260, 24), wt, HORIZONTAL_ALIGNMENT_LEFT, 250, 14, Color(0.75, 0.9, 1.0))
 	# time
 	var t: float = game.time
 	var ts := "%02d:%02d" % [int(t) / 60, int(t) % 60]
@@ -629,6 +691,9 @@ func _draw_top():
 	ci.draw_string(G.font, Vector2(170, 24), "F1 操作說明   T 外交", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.7, 0.7, 0.7))
 	if show_fps:
 		ci.draw_string(G.font_bold, Vector2(vs.x - SW - 150, 24), "FPS %d  單位 %d  地圖 %dx%d" % [Engine.get_frames_per_second(), game.units.size(), game.W, game.H], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.6, 1, 0.6))
+		var perf := "邏輯 %.1fms  繪製呼叫 %d  物件 %d" % [Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+			Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME), Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)]
+		ci.draw_string(G.font_bold, Vector2(vs.x - SW - 330, 44), perf, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.6, 1, 0.6))
 	var np: int = game.human.proposal.size()
 	if np > 0 and int(noise_t * 2.0) % 2 == 0:
 		ci.draw_string(G.font_bold, Vector2(262, 24), "✉ 外交提議", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 0.85, 0.3))
@@ -678,9 +743,18 @@ func _draw_top():
 			ly += 16.0
 	var y := 52.0
 	if game.objective != "":
-		ci.draw_rect(Rect2(8, 34, 330, 24), Color(0.3, 0.05, 0.02, 0.6))
+		var ow := maxf(330.0, G.font_bold.get_string_size(game.objective, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x + 20.0)
+		ci.draw_rect(Rect2(8, 34, ow, 24), Color(0.3, 0.05, 0.02, 0.6))
 		ci.draw_string(G.font_bold, Vector2(16, 52), game.objective, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1, 0.85, 0.4))
 		y = 80.0
+	var ct: String = game.contracts.progress_text() if game.contracts != null else ""
+	if ct != "":
+		var cy := y - 18.0
+		var cw := G.font_bold.get_string_size(ct, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x + 20.0
+		ci.draw_rect(Rect2(8, cy, cw, 22), Color(0.03, 0.15, 0.3, 0.7))
+		ci.draw_rect(Rect2(8, cy, 3, 22), Color(0.4, 0.75, 1.0))
+		ci.draw_string(G.font_bold, Vector2(18, cy + 16), ct, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.9, 1.0))
+		y += 26.0
 	# messages
 	for m in msgs:
 		var a := clampf(7.0 - m.t, 0.0, 1.0)
@@ -710,6 +784,12 @@ func _draw_top():
 			if e.kind == "unit":
 				if e.rank > 0:
 					extra += "   " + ["", "老兵 ★", "精英 ★★"][e.rank]
+				if e.has_meta("boss"):
+					extra += "   ☠ 首領"
+				if e.kills > 0:
+					extra += "   擊殺 %d" % e.kills
+				if e.player == game.human and e.ability_status() != "":
+					extra += "   " + e.ability_status()
 				if e.def.get("harvester", false):
 					extra += "   載礦 %d%%" % int(e.cargo / e.CARGO_MAX * 100)
 			else:
@@ -725,7 +805,7 @@ func _draw_top():
 				parts.append("%s x%d" % [k, counts[k]])
 			ci.draw_string(G.font, r.position + Vector2(10, 46), "、".join(parts), HORIZONTAL_ALIGNMENT_LEFT, pw - 20, 13, Color(0.85, 0.85, 0.85))
 	# hint bar
-	var hint := "左鍵:選取/框選　右鍵:移動/攻擊　A:攻擊移動　S:停止　D:展開基地車　Ctrl+數字:編隊　H:回基地　N:閒置礦車　I:閒置單位　Tab:生產建築　滾輪:縮放"
+	var hint := "左鍵:選取/框選　右鍵:移動/攻擊　A:攻擊移動　S:停止　F:技能　D:展開基地車　Ctrl+數字:編隊　H:回基地　空白:最近警報　N:閒置礦車　I:閒置單位　Tab:生產建築　滾輪:縮放"
 	ci.draw_rect(Rect2(0, vs.y - 22, vs.x - SW, 22), Color(0, 0, 0, 0.55))
 	ci.draw_string(G.font, Vector2(10, vs.y - 6), hint, HORIZONTAL_ALIGNMENT_LEFT, vs.x - SW - 20, 12, Color(0.75, 0.75, 0.72))
 	# placement tip
@@ -808,6 +888,11 @@ func rebuild_diplomacy():
 		var nm := Label.new()
 		var st := "盟友" if human.allies.has(q.index) else ("停火中" if (human.ceasefire.has(q.index) and game.time < float(human.ceasefire[q.index])) else ("敵對" if human.is_enemy_of(q) else "中立"))
 		nm.text = "%s（%s）  好感 %d%%  [%s]" % [q.name, q.country_name(), int(q.relation(human)), st]
+		if human.has_role("radar") and game.mission == null:
+			for ai in game.ais:
+				if ai.p == q:
+					nm.text += "
+風格：" + ai.persona_name()
 		nm.custom_minimum_size = Vector2(330, 0)
 		nm.add_theme_color_override("font_color", q.color.lightened(0.3))
 		row.add_child(nm)
@@ -921,11 +1006,19 @@ func toggle_pause_menu():
 		cb.button_pressed = G.settings.get("edge_scroll", true)
 		cb.toggled.connect(func(v): G.settings["edge_scroll"] = v; G.save_settings())
 		vb.add_child(cb)
+		add_btn(vb, "投降（結束本局）", func(): surrender())
 		add_btn(vb, "返回主選單", func(): G.main.to_menu())
-		add_btn(vb, "離開遊戲", func(): get_tree().quit())
+		add_btn(vb, "離開遊戲", func(): G.main.quit_game())
 		pause_panel.visible = false
 	pause_panel.visible = not pause_panel.visible
 	game.paused = pause_panel.visible
+
+func surrender():
+	if pause_panel != null:
+		pause_panel.visible = false
+	game.paused = false
+	game.message("指揮官已宣布投降")
+	game.end_game(false)
 
 func show_end(win: bool, fresh: Array = []):
 	if pause_panel != null:
@@ -942,12 +1035,26 @@ func show_end(win: bool, fresh: Array = []):
 		"損失單位：%d   損失建築：%d" % [h.stats.lost, h.stats.bld_lost],
 		"採礦收入：$%s" % G.fmt_money(h.stats.harvested),
 	]
+	if game.gmode != null and game.gmode.is_survival():
+		lines.insert(0, "生存波數：%d / %d" % [game.gmode.wave - (0 if game.gmode.cleared else 1), game.gmode.SURV_GOAL])
+	elif game.gmode != null and game.gmode.is_koth():
+		lines.insert(0, "據點控制：%d 點" % int(game.gmode.score.get(h.team, 0.0)))
+	if int(game.settings.get("daily", 0)) > 0:
+		var rr: Dictionary = load("res://scripts/records.gd").get_rec()
+		if win and float(rr.get("daily_best", 0.0)) > 0.0:
+			lines.insert(0, "每日挑戰勝利！今日最佳：%02d:%02d" % [int(rr.daily_best) / 60, int(rr.daily_best) % 60])
+		elif not win:
+			lines.insert(0, "每日挑戰失敗，明天會有新戰場；今天也可以再試一次")
+	if not game.mvp.is_empty():
+		lines.append("最佳單位：%s（擊殺 %d%s）" % [game.mvp.name, int(game.mvp.kills), ["", "，老兵", "，精英"][int(game.mvp.rank)]])
 	for l in lines:
 		var lb := Label.new()
 		lb.text = l
 		lb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lb.add_theme_font_size_override("font_size", 17)
 		vb.add_child(lb)
+	if game.history.size() >= 2:
+		vb.add_child(make_history_chart())
 	for a in fresh:
 		var al := Label.new()
 		al.text = "🏆 成就解鎖：%s — %s" % [a.name, a.desc]
@@ -978,8 +1085,42 @@ func show_end(win: bool, fresh: Array = []):
 			vb.add_child(lb)
 	add_btn(vb, "再玩一局", func(): G.main.restart_game())
 	add_btn(vb, "返回主選單", func(): G.main.to_menu())
-	add_btn(vb, "離開遊戲", func(): get_tree().quit())
+	add_btn(vb, "離開遊戲", func(): G.main.quit_game())
 	Sfx.play("alarm" if not win else "cash", -2.0)
+
+# 戰後軍力曲線（單位 + 建築價值），每條線是一名玩家
+func make_history_chart() -> Control:
+	var hist: Array = game.history
+	var ctl := Control.new()
+	ctl.custom_minimum_size = Vector2(520, 170)
+	var ps: Array = game.players.filter(func(p): return not p.neutral)
+	ctl.draw.connect(func():
+		var r := Rect2(Vector2(36, 18), ctl.size - Vector2(46, 34))
+		ctl.draw_rect(Rect2(Vector2.ZERO, ctl.size), Color(0.03, 0.04, 0.05, 0.7))
+		ctl.draw_string(G.font_bold, Vector2(8, 14), "軍力變化", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 0.85, 0.4))
+		var mx := 1.0
+		var t1: float = maxf(1.0, float(hist[-1].t))
+		for row in hist:
+			for p in ps:
+				mx = maxf(mx, float(row.get(p.index, 0.0)))
+		for k in 5:
+			var y := r.end.y - r.size.y * k / 4.0
+			ctl.draw_line(Vector2(r.position.x, y), Vector2(r.end.x, y), Color(1, 1, 1, 0.08), 1.0)
+		ctl.draw_string(G.font, Vector2(2, r.position.y + 8), "$%dk" % int(mx / 1000.0), HORIZONTAL_ALIGNMENT_LEFT, 34, 10, Color(0.7, 0.7, 0.7))
+		ctl.draw_string(G.font, Vector2(r.end.x - 60, ctl.size.y - 3), "%02d:%02d" % [int(t1) / 60, int(t1) % 60], HORIZONTAL_ALIGNMENT_RIGHT, 60, 10, Color(0.7, 0.7, 0.7))
+		var lx := r.position.x + 70.0
+		for p in ps:
+			var pts := PackedVector2Array()
+			for row in hist:
+				var x: float = r.position.x + r.size.x * float(row.t) / t1
+				var y: float = r.end.y - r.size.y * float(row.get(p.index, 0.0)) / mx
+				pts.append(Vector2(x, y))
+			ctl.draw_polyline(pts, p.color, 3.0 if p == game.human else 2.0, true)
+			ctl.draw_rect(Rect2(lx, 5, 10, 10), p.color)
+			var nm: String = "你" if p == game.human else (p.country_name() if p.country_name() != "" else p.name)
+			ctl.draw_string(G.font, Vector2(lx + 13, 14), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.9, 0.9, 0.9))
+			lx += 22.0 + G.font.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x)
+	return ctl
 
 func build_help():
 	var pr := make_panel("操作說明")

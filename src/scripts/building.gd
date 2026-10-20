@@ -39,7 +39,7 @@ func setup(g, p, id_: String, tl: Vector2i, instant := false):
 	sight = float(def.sight)
 	if def.has("weapon"):
 		weapon = Defs.WEAPONS[def.weapon]
-	sheet = G.sheet(id_)
+	sheet = G.sheet(def.get("sprite", id_))
 	tsheet = G.sheet(id_ + "_t")
 	bsheet = G.sheet(id_ + "_build")
 	build_p = 1.0 if instant else 0.0
@@ -194,6 +194,26 @@ func on_attacked(attacker):
 		game.message("警告：基地遭受攻擊！")
 		game.ping(pos)
 
+# 科技建築上方的圖示徽章（顏色＝擁有者，中立為白色）
+func draw_tech_badge():
+	var o := Vector2(0, -sheet.ay / sheet.res - 6.0 + sin(anim_t * 2.0) * 2.0)
+	var c: Color = Color(0.92, 0.92, 0.92) if player.neutral else player.color
+	draw_circle(o, 13.0, Color(0, 0, 0, 0.6))
+	draw_circle(o, 11.0, c.darkened(0.35))
+	draw_arc(o, 11.0, 0, TAU, 24, c.lightened(0.4), 2.0)
+	match def.tech:
+		"hosp":
+			draw_rect(Rect2(o - Vector2(6, 2), Vector2(12, 4)), Color(1, 0.25, 0.2))
+			draw_rect(Rect2(o - Vector2(2, 6), Vector2(4, 12)), Color(1, 0.25, 0.2))
+		"shop":
+			draw_arc(o, 5.0, 0, TAU, 16, Color(1, 0.85, 0.3), 3.0)
+			for k in 6:
+				var a := TAU * k / 6.0 + anim_t
+				draw_line(o + Vector2.from_angle(a) * 5.0, o + Vector2.from_angle(a) * 8.0, Color(1, 0.85, 0.3), 2.5)
+		"air":
+			draw_colored_polygon(PackedVector2Array([o + Vector2(0, -8), o + Vector2(2, -2), o + Vector2(8, 1), o + Vector2(2, 1),
+				o + Vector2(1, 6), o + Vector2(3, 8), o + Vector2(-3, 8), o + Vector2(-1, 6), o + Vector2(-2, 1), o + Vector2(-8, 1), o + Vector2(-2, -2)]), Color(0.6, 0.9, 1.0))
+
 func frame_index() -> int:
 	if sheet == null:
 		return 0
@@ -217,6 +237,8 @@ func frame_index() -> int:
 					if o != null and not o.dead and o.def.get("role", "") == "wall":
 						m |= 1 << k
 				return m
+	if def.get("role", "") == "techb" and def.get("tech", "") == "air":
+		return 2 % sheet.n
 	return mini(var_frame, sheet.n - 1)
 
 func _draw():
@@ -253,6 +275,8 @@ func _draw():
 		bsheet.draw(self, bf, Vector2.ZERO, col, mod)
 	else:
 		sheet.draw(self, frame_index(), Vector2.ZERO, col, mod, 1.0, clampf(clip, 0.02, 1.0))
+	if def.has("tech"):
+		draw_tech_badge()
 	if def.has("garrison") and (not occupants.is_empty() or selected):
 		var n: int = def.garrison
 		var y: float = -sheet.ay / sheet.res + 4.0

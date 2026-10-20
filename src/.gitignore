@@ -1,2 +1,17 @@
+# Godot 匯入快取與匯出產物
 .godot/
-*.tmp
+*.translation
+build_web/
+*.pck
+*.exe
+*.zip
+
+# 片頭影片原始檔（遊戲未使用，檔案過大）
+video/
+
+# 系統檔
+.DS_Store
+Thumbs.db
+
+# 本機工具設定
+.claude/

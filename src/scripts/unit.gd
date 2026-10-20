@@ -43,6 +43,9 @@ var landed := false
 var cell_key := -1
 var jam_t := 0.0
 var waypoints: Array = []
+var dug := false              # 步兵技能：掘壕固守
+var smoke_until := -100.0     # 載具技能：煙霧彈
+var ab_ready := -100.0        # 技能冷卻結束時間
 
 func setup(g, p, id_: String, at: Vector2):
 	game = g
@@ -93,7 +96,59 @@ func is_air() -> bool:
 	return ukind == "air"
 
 func weapon_range() -> float:
-	return float(weapon.get("range", 0.0))
+	var r := float(weapon.get("range", 0.0))
+	if game.weather != null:
+		r *= game.weather.range_mult(r)
+	return r + (1.5 if dug else 0.0)
+
+# ───────────────────────── 技能（F 鍵） ─────────────────────────
+func ability_name() -> String:
+	if ukind == "inf" and not weapon.is_empty() and not def.get("c4", false):
+		return "掘壕固守"
+	if ukind == "veh" and not def.has("mcv"):
+		return "煙霧彈"
+	return ""
+
+func ability_armor() -> float:
+	var m := 1.0
+	if dug:
+		m *= 0.6
+	if game.time < smoke_until:
+		m *= 0.5
+	return m
+
+func ability_status() -> String:
+	var nm := ability_name()
+	if nm == "":
+		return ""
+	if dug:
+		return "掘壕中（F 解除）"
+	if game.time < smoke_until:
+		return "煙霧掩護 %d 秒" % int(ceil(smoke_until - game.time))
+	if game.time < ab_ready:
+		return "%s 冷卻 %d 秒" % [nm, int(ceil(ab_ready - game.time))]
+	return "F：" + nm
+
+# 回傳是否成功施放
+func use_ability() -> bool:
+	match ability_name():
+		"掘壕固守":
+			if dug:
+				dug = false
+			else:
+				cmd_stop()
+				dug = true
+				game.fx.ore_dust(pos)
+			return true
+		"煙霧彈":
+			if game.time < ab_ready:
+				return false
+			smoke_until = game.time + 8.0
+			ab_ready = game.time + 40.0
+			for k in 6:
+				game.fx.smoke_screen(pos)
+			return true
+	return false
 
 func update(dt: float):
 	if dead:
@@ -108,6 +163,8 @@ func update(dt: float):
 			queue_redraw()
 			return
 	anim_t += dt
+	if game.time < smoke_until and randf() < dt * 7.0:
+		game.fx.smoke_screen(pos)
 	cd -= dt
 	cd2 -= dt
 	fire_t -= dt
@@ -155,6 +212,7 @@ func next_waypoint() -> bool:
 	return true
 
 func cmd_move(dest: Vector2, attack_move := false):
+	dug = false
 	waypoints.clear()
 	target = null
 	move_dest = dest
@@ -348,6 +406,11 @@ func attack_step(dt: float, t):
 	if d > rng:
 		if ukind == "air":
 			return
+		if dug:
+			# 掘壕中的步兵不追擊
+			target = null
+			order = "idle"
+			return
 		chase(dt, t)
 		if has_turret:
 			turret = G.angle_to_angle(turret, (t.pos - pos).angle(), 5.0 * dt)
@@ -458,6 +521,9 @@ func on_attacked(attacker):
 			Sfx.say("base_under_attack", 15.0)
 	if ukind == "air":
 		return
+	# AI 載具受重創時自動施放煙霧彈
+	if player.is_ai and ukind == "veh" and hp < max_hp * 0.5 and game.time >= ab_ready and ability_name() == "煙霧彈":
+		use_ability()
 	if (order == "idle" or order == "return_home") and can_hit(weapon, attacker):
 		if attacker.dist_to(pos) < weapon_range() + 5.0:
 			target = attacker
@@ -480,7 +546,7 @@ func follow(dt: float) -> bool:
 	var wp: Vector2 = path[0]
 	var to := wp - pos
 	var d := to.length()
-	var spd := speed
+	var spd: float = speed * (game.weather.speed_mult(self) if game.weather != null else 1.0)
 	if ukind == "veh" or ukind == "ship":
 		var ang := to.angle()
 		if d > 0.05:
@@ -622,7 +688,7 @@ func update_harvester(dt: float):
 				mine_t = 0.0
 				var amt := minf(cargo, 50.0)
 				cargo -= amt
-				var gain = amt * player.income_factor()
+				var gain = amt * player.income_factor() * (1.25 if player.has_up("up_mining") else 1.0) * (1.5 if game.mut("rich") else 1.0)
 				player.money += gain
 				player.stats.harvested += int(gain)
 				if player == game.human and randf() < 0.3:
@@ -814,7 +880,7 @@ func fly_to(dt: float, p: Vector2, tol: float) -> bool:
 		return true
 	var ang := to.angle()
 	facing = G.angle_to_angle(facing, ang, turn_rate * dt)
-	var spd := speed
+	var spd: float = speed * (game.weather.speed_mult(self) if game.weather != null else 1.0)
 	if G.adiff(facing, ang) > 0.8 and def.get("jet", false):
 		spd *= 0.7
 	if not def.get("jet", false):
@@ -847,6 +913,15 @@ func _draw():
 		sheet.draw(self, 16, Vector2.ZERO, player.color, Color.WHITE)
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		return
+	if dug:
+		# 沙包掩體
+		for k in 12:
+			var a := TAU * k / 12.0
+			var bp := Vector2(cos(a) * 14.0, sin(a) * 7.0 - 1.0)
+			draw_set_transform(bp, 0.0, Vector2(1.0, 0.6))
+			draw_circle(Vector2.ZERO, 4.2, Color(0.42, 0.36, 0.24))
+			draw_circle(Vector2(-0.8, -1.2), 3.0, Color(0.6, 0.53, 0.38))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	var col: Color = player.color
 	var mod := Color.WHITE
 	if flash_t > 0.0:

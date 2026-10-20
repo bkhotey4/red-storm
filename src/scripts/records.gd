@@ -4,7 +4,7 @@ extends RefCounted
 
 const PATH := "user://records.cfg"
 const KEYS := ["games", "wins", "losses", "built", "killed", "lost", "bld_lost", "harvested", "spies", "powers",
-	"treaties", "missions", "play_time", "best_win", "max_kills", "carriers", "drones", "walls_broken", "countries", "maps", "ach", "streak", "best_streak", "nukes_survived"]
+	"treaties", "missions", "play_time", "best_win", "max_kills", "carriers", "drones", "walls_broken", "countries", "maps", "ach", "streak", "best_streak", "nukes_survived", "best_wave", "koth_wins", "contracts", "techs", "daily_date", "daily_best", "daily_wins"]
 
 const ACH := [
 	{"id": "first_blood", "name": "初次勝利", "desc": "贏得第一場遭遇戰或任務", "icon": "★"},
@@ -27,6 +27,12 @@ const ACH := [
 	{"id": "streak5", "name": "連勝 5 場", "desc": "連續贏得 5 場戰鬥", "icon": "✪"},
 	{"id": "ironwall", "name": "鐵壁", "desc": "贏得一場戰鬥且未損失任何建築", "icon": "▣"},
 	{"id": "massacre", "name": "殲滅戰", "desc": "單場消滅 150 個敵軍單位", "icon": "☠"},
+	{"id": "holdout", "name": "堅守陣線", "desc": "生存模式撐過 10 波", "icon": "▲"},
+	{"id": "survivor", "name": "最後防線", "desc": "生存模式擊退全部 25 波敵軍", "icon": "♛"},
+	{"id": "king", "name": "山丘之王", "desc": "贏得一場據點爭奪", "icon": "⚑"},
+	{"id": "daily", "name": "日日精進", "desc": "贏得一次每日挑戰", "icon": "☀"},
+	{"id": "merc", "name": "傭兵本色", "desc": "累計完成 10 項戰場委託", "icon": "✉"},
+	{"id": "techlord", "name": "科技掠奪者", "desc": "累計佔領 10 座科技建築", "icon": "⚙"},
 ]
 
 static var _rec: Dictionary = {}
@@ -102,6 +108,19 @@ static func on_game_end(game, win: bool) -> Array:
 	r.harvested = float(r.harvested) + float(st.get("harvested", 0))
 	r.play_time = float(r.play_time) + game.time
 	r.max_kills = maxi(int(r.max_kills), int(st.get("killed", 0)))
+	var daily := int(game.settings.get("daily", 0))
+	if daily > 0 and win:
+		r.daily_wins = int(r.daily_wins) + 1
+		if int(r.daily_date) != daily or float(r.daily_best) <= 0.0 or game.time < float(r.daily_best):
+			r.daily_date = daily
+			r.daily_best = game.time
+	var gm = game.get("gmode")
+	var surv_waves := 0
+	if gm != null and gm.is_survival():
+		surv_waves = gm.wave - (0 if gm.cleared else 1)
+		r.best_wave = maxi(int(r.best_wave), surv_waves)
+	if gm != null and gm.is_koth() and win:
+		r.koth_wins = int(r.koth_wins) + 1
 	if game.mission != null and win:
 		add_list("maps", "mission_" + str(game.mission.id))
 	else:
@@ -138,6 +157,12 @@ static func on_game_end(game, win: bool) -> Array:
 		"streak5": int(r.streak) >= 5,
 		"ironwall": win and int(st.get("bld_lost", 0)) == 0 and game.time > 120.0,
 		"massacre": int(st.get("killed", 0)) >= 150,
+		"holdout": int(r.best_wave) >= 10,
+		"survivor": gm != null and gm.is_survival() and win,
+		"king": int(r.koth_wins) >= 1,
+		"merc": int(r.contracts) >= 10,
+		"daily": int(r.daily_wins) >= 1,
+		"techlord": int(r.techs) >= 10,
 	}
 	for a in ACH:
 		if not has_ach(a.id) and cond.get(a.id, false):

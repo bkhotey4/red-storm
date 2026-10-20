@@ -36,13 +36,17 @@ func alive() -> bool:
 	return not dead and is_instance_valid(self)
 
 func armor_mult() -> float:
-	return [1.0, 0.85, 0.7][rank]
+	return [1.0, 0.85, 0.7][rank] * player.up_armor(self) * ability_armor()
 
 func dmg_mult() -> float:
-	return [1.0, 1.2, 1.5][rank]
+	return [1.0, 1.2, 1.5][rank] * player.up_damage(self)
+
+func ability_armor() -> float:
+	return 1.0
 
 func add_kill():
 	kills += 1
+	game.note_kill(self)
 	var nr := 0
 	if kills >= 6:
 		nr = 2
@@ -57,7 +61,7 @@ func take_damage(amount: float, attacker = null, wh := "ap"):
 	if dead:
 		return
 	var mult: float = float(Defs.WARHEADS.get(wh, Defs.WARHEADS.ap).get(armor, 1.0))
-	var d := amount * mult * armor_mult()
+	var d := amount * mult * armor_mult() * (1.6 if game.mut("glass") else 1.0)
 	if armor == "naval" and attacker != null and is_instance_valid(attacker) and attacker.get("player") != null and Defs.COUNTRIES.has(attacker.player.country):
 		d *= float(Defs.COUNTRIES[attacker.player.country].get("dmg_vs_ship", 1.0))
 	if d <= 0.0:

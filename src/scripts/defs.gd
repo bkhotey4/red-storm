@@ -273,8 +273,39 @@ const BUILDINGS = {
 	"civ_barn": {"name": "農舍", "faction": "neutral", "role": "civ", "cat": "none", "size": Vector2i(2, 2), "hp": 700, "power": 0,
 		"cost": 0, "sight": 3, "buildable": false, "civ": true, "garrison": 4, "desc": "步兵可進駐並從中射擊。"},
 
+	# 科技建築：中立，用工程師佔領後提供全軍加成（sprite 借用平民/機場建築外觀）
+	"tech_hosp": {"name": "科技醫院", "faction": "neutral", "role": "techb", "tech": "hosp", "sprite": "civ_office", "cat": "none", "size": Vector2i(2, 2), "hp": 1400, "power": 0,
+		"cost": 1500, "sight": 5, "buildable": false, "desc": "工程師佔領後：全軍步兵每秒回復 3% 生命。"},
+	"tech_shop": {"name": "機械維修廠", "faction": "neutral", "role": "techb", "tech": "shop", "sprite": "civ_shop", "cat": "none", "size": Vector2i(2, 2), "hp": 1400, "power": 0,
+		"cost": 1500, "sight": 5, "buildable": false, "desc": "工程師佔領後：全軍載具與艦艇每秒回復 2% 生命。"},
+	"tech_air": {"name": "科技機場", "faction": "neutral", "role": "techb", "tech": "air", "sprite": "a_radar", "cat": "none", "size": Vector2i(4, 2), "hp": 1600, "power": 0,
+		"cost": 2000, "sight": 7, "buildable": false, "desc": "工程師佔領後：獲得「空降部隊」特殊能力。"},
+
 	"oil": {"name": "油井", "faction": "neutral", "role": "oil", "cat": "none", "size": Vector2i(2, 2), "hp": 1000, "power": 0,
 		"cost": 1000, "sight": 3, "buildable": false, "desc": "用工程師佔領後持續提供資金。"},
+}
+
+# ───────────────────────── 科技升級 ─────────────────────────
+# 每項只能研究一次，效果永久作用於全軍。icon=建造欄圖示文字
+const UPGRADES = {
+	"up_inf_armor": {"name": "防彈插板", "cat": "upgrade", "faction": "any", "cost": 1000, "req": ["bar", "radar"], "icon": "盾",
+		"desc": "全體步兵受到的傷害 -20%。"},
+	"up_inf_weapon": {"name": "精準射擊訓練", "cat": "upgrade", "faction": "any", "cost": 1000, "req": ["bar", "radar"], "icon": "準",
+		"desc": "全體步兵武器傷害 +20%。"},
+	"up_veh_armor": {"name": "複合裝甲", "cat": "upgrade", "faction": "any", "cost": 1800, "req": ["fac", "radar"], "icon": "甲",
+		"desc": "載具與艦艇受到的傷害 -20%。"},
+	"up_veh_weapon": {"name": "鎢芯穿甲彈", "cat": "upgrade", "faction": "any", "cost": 1800, "req": ["fac", "radar"], "icon": "彈",
+		"desc": "載具與艦艇武器傷害 +20%。"},
+	"up_engine": {"name": "渦輪增壓引擎", "cat": "upgrade", "faction": "any", "cost": 1200, "req": ["fac", "radar"], "icon": "速",
+		"desc": "載具移動速度 +15%。"},
+	"up_air": {"name": "匿蹤塗層", "cat": "upgrade", "faction": "any", "cost": 1500, "req": ["radar", "tech"], "icon": "隱",
+		"desc": "飛機與無人機受到的傷害 -25%。"},
+	"up_fort": {"name": "強化工事", "cat": "upgrade", "faction": "any", "cost": 1500, "req": ["radar"], "icon": "堡",
+		"desc": "所有建築受到的傷害 -20%，防禦塔傷害 +15%。"},
+	"up_mining": {"name": "高效精煉", "cat": "upgrade", "faction": "any", "cost": 2000, "req": ["ref", "radar"], "icon": "$",
+		"desc": "採礦收入 +25%。"},
+	"up_academy": {"name": "戰訓學院", "cat": "upgrade", "faction": "any", "cost": 3000, "req": ["tech"], "icon": "★",
+		"desc": "之後生產的所有單位直接晉升為老兵。"},
 }
 
 const BUILD_ORDER = {
@@ -285,6 +316,7 @@ const BUILD_ORDER = {
 	"vehicle": ["a_tank", "a_ifv", "a_harv", "a_ew", "a_himars", "a_beam", "a_mcv", "a_fpv", "a_tb2", "a_jet",
 				"s_tank", "s_flaktrk", "s_harv", "s_ew", "s_arty", "s_tos", "s_iskander", "s_mammoth", "s_mcv", "s_lancet", "s_shahed", "s_airship",
 				"a_apache", "a_type10", "a_k9", "a_hf", "s_bmpt", "s_hwasong", "s_technical"],
+	"upgrade": ["up_inf_armor", "up_inf_weapon", "up_veh_armor", "up_veh_weapon", "up_engine", "up_mining", "up_fort", "up_air", "up_academy"],
 	"naval": ["a_destroyer", "a_carrier", "a_cvn", "a_tuojiang", "a_seadrone", "s_sub", "s_dread", "s_cvn", "s_fastboat"],
 }
 
@@ -364,6 +396,8 @@ func get_def(id: String) -> Dictionary:
 		return UNITS[id]
 	if BUILDINGS.has(id):
 		return BUILDINGS[id]
+	if UPGRADES.has(id):
+		return UPGRADES[id]
 	return {}
 
 func build_time(id: String) -> float:

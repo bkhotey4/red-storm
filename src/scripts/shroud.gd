@@ -52,6 +52,11 @@ func _process(_dt: float):
 		queue_redraw()
 
 func _draw():
+	var _t := Time.get_ticks_usec()
+	_draw_impl()
+	G.game._pf("shroud", _t)
+
+func _draw_impl():
 	if img == null:
 		init_tex()
 	var W: int = game.W

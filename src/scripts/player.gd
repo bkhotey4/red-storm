@@ -15,7 +15,8 @@ var money := 10000.0
 var power_prod := 0.0
 var power_use := 0.0
 var low_power := false
-var queues := {"building": [], "defense": [], "infantry": [], "vehicle": []}
+var queues := {"building": [], "defense": [], "infantry": [], "vehicle": [], "upgrade": []}
+var upgrades := {}         # 已完成的科技升級 id -> true
 var ready := {"building": "", "defense": ""}
 var powers := {}
 var sanctioned_until := -100.0
@@ -36,6 +37,7 @@ var funds_warned := 0.0
 var last_under_attack := -100.0
 var power_dirty := true
 var was_low := false
+var repeat := {}           # 循環生產中的單位 id -> true
 
 func is_enemy_of(other) -> bool:
 	if other == null or other == self:
@@ -102,6 +104,8 @@ func count_type(id: String) -> int:
 
 func producer_role(def: Dictionary) -> String:
 	match def.get("cat", ""):
+		"upgrade":
+			return "radar"
 		"building", "defense":
 			return "cy"
 		"infantry":
@@ -139,6 +143,12 @@ func available(id: String) -> bool:
 	var def: Dictionary = Defs.get_def(id)
 	if def.is_empty() or def.get("buildable", true) == false:
 		return false
+	if def.get("cat", "") == "upgrade":
+		return true
+	if game != null and game.mut("nosuper") and def.get("role", "") == "sw":
+		return false
+	if game != null and game.mut("infantry") and def.get("cat", "") in ["vehicle", "air", "naval"] and not def.get("harvester", false) and not def.has("mcv"):
+		return false
 	if def.has("country") and def.country != country:
 		return false
 	var role := producer_role(def)
@@ -154,6 +164,8 @@ func can_build(id: String) -> bool:
 	var def: Dictionary = Defs.get_def(id)
 	if def.has("limit") and count_type(id) >= int(def.limit):
 		return false
+	if def.get("cat", "") == "upgrade" and (upgrades.has(id) or queued_count(id) > 0):
+		return false
 	return has_role(producer_role(def))
 
 func enqueue(id: String) -> bool:
@@ -165,6 +177,8 @@ func enqueue(id: String) -> bool:
 	if cat == "building" or cat == "defense":
 		if q.size() > 0 or ready[cat] != "":
 			return false
+	elif cat == "upgrade" and q.size() >= 3:
+		return false
 	elif q.size() >= 15:
 		return false
 	q.append({"id": id, "progress": 0.0, "spent": 0.0, "hold": false})
@@ -246,6 +260,8 @@ func update(dt: float):
 		if n == 0 or not has_role(role):
 			continue
 		var t := Defs.build_time(it.id) / build_mult * Defs.country_mult(country, "time", it.id)
+		if game.mut("fastbuild"):
+			t *= 0.5
 		var mult := 1.0 + 0.4 * (mini(n, 4) - 1)
 		if low_power:
 			mult *= 0.45
@@ -277,9 +293,17 @@ func update(dt: float):
 				if not is_ai:
 					Sfx.say("building_ready", 1.0)
 					game.message("%s 建造完成，請選擇放置位置" % def.name)
+			elif cat == "upgrade":
+				finish_upgrade(it.id)
 			else:
 				game.spawn_produced(self, it.id)
 				stats.built += 1
+				# 循環生產：完成後自動再排一個（排在隊尾）
+				if repeat.has(it.id) and queued_count(it.id) == 0:
+					if not enqueue(it.id):
+						repeat.erase(it.id)
+						if not is_ai:
+							game.message("%s 已無法生產，循環生產取消" % def.name)
 	# special powers
 	var have := {}
 	for b in game.buildings:
@@ -288,6 +312,8 @@ func update(dt: float):
 		# 國家特殊能力：需要雷達 / 空軍指揮部
 		if b.player == self and not b.dead and b.built() and b.def.role == "radar" and Defs.COUNTRIES.has(country) and Defs.COUNTRIES[country].has("power"):
 			have[Defs.COUNTRIES[country].power] = true
+		if b.player == self and not b.dead and b.def.get("tech", "") == "air":
+			have["paradrop"] = true
 	if not allies.is_empty() and not is_ai:
 		have["allyaid"] = true
 	for k in powers.keys():
@@ -299,10 +325,59 @@ func update(dt: float):
 		var c: float = powers[k]
 		if c < 1.0 and not low_power:
 			var cm: float = float(Defs.COUNTRIES[country].get("charge", {}).get(k, 1.0)) if Defs.COUNTRIES.has(country) else 1.0
+			if game.mut("superfast"):
+				cm *= 2.0
 			var nc := minf(1.0, c + dt * cm / float(Defs.SUPER[k].charge))
 			powers[k] = nc
 			if nc >= 1.0:
 				game.on_power_ready(self, k)
+
+func finish_upgrade(id: String):
+	upgrades[id] = true
+	if OS.get_cmdline_user_args().has("--autotest"):
+		print("  UPGRADE t=%d %s %s" % [int(game.time), name, id])
+	if id == "up_academy":
+		vet_bonus = true
+	if id == "up_engine":
+		for u in units():
+			if u.ukind == "veh":
+				u.speed *= 1.15
+	if not is_ai:
+		Sfx.play("cash", -6.0)
+		game.message("科技升級完成：%s — %s" % [Defs.UPGRADES[id].name, Defs.UPGRADES[id].desc])
+	elif game.human.is_enemy_of(self) and game.human.has_role("radar"):
+		game.message("情報：%s 完成了「%s」" % [name, Defs.UPGRADES[id].name])
+
+func has_up(id: String) -> bool:
+	return upgrades.has(id)
+
+# 受到傷害倍率（科技升級）
+func up_armor(e) -> float:
+	if upgrades.is_empty():
+		return 1.0
+	if e.kind == "building":
+		return 0.8 if has_up("up_fort") else 1.0
+	match e.ukind:
+		"inf":
+			return 0.8 if has_up("up_inf_armor") else 1.0
+		"veh", "ship":
+			return 0.8 if has_up("up_veh_armor") else 1.0
+		"air":
+			return 0.75 if has_up("up_air") else 1.0
+	return 1.0
+
+# 輸出傷害倍率（科技升級）
+func up_damage(e) -> float:
+	if upgrades.is_empty():
+		return 1.0
+	if e.kind == "building":
+		return 1.15 if has_up("up_fort") else 1.0
+	match e.ukind:
+		"inf":
+			return 1.2 if has_up("up_inf_weapon") else 1.0
+		"veh", "ship":
+			return 1.2 if has_up("up_veh_weapon") else 1.0
+	return 1.0
 
 func sanctioned() -> bool:
 	return game.time < sanctioned_until

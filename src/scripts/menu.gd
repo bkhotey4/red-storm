@@ -78,18 +78,23 @@ func build_ui():
 	var root := HBoxContainer.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.offset_left = 60
-	root.offset_top = 200
+	root.offset_top = 175
 	root.offset_right = -60
-	root.offset_bottom = -150
+	root.offset_bottom = -16
 	root.add_theme_constant_override("separation", 40)
 	add_child(root)
+	# 左側設定面板：視窗太矮時可捲動
+	var lscroll := ScrollContainer.new()
+	lscroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	lscroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(lscroll)
 	var pc := PanelContainer.new()
 	pc.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	root.add_child(pc)
+	lscroll.add_child(pc)
 	var grid := GridContainer.new()
 	grid.columns = 2
 	grid.add_theme_constant_override("h_separation", 18)
-	grid.add_theme_constant_override("v_separation", 10)
+	grid.add_theme_constant_override("v_separation", 7)
 	pc.add_child(grid)
 	var cnames := []
 	for c in Defs.COUNTRY_ORDER:
@@ -109,9 +114,10 @@ func build_ui():
 	grid.add_child(country_desc)
 	opts.country.item_selected.connect(func(_i): _update_country_desc())
 	_update_country_desc()
+	add_opt(grid, "mode", "遊戲模式", ["殲滅戰（摧毀所有敵方建築）", "生存模式（抵擋 25 波敵軍）", "據點爭奪（佔領中央指揮所）"], 0)
 	add_opt(grid, "enemies", "敵人數量", ["1 名對手", "2 名對手", "3 名對手"], 0)
 	add_opt(grid, "ai_allied", "敵軍關係", ["敵軍互相結盟", "各自為戰(混戰)"], 0)
-	add_opt(grid, "difficulty", "電腦難度", ["簡單（AI 收入 -25%，不騷擾）", "普通（會騷擾採礦車）", "困難（AI 收入 +35%，猛攻超武）"], 1)
+	add_opt(grid, "difficulty", "電腦難度", ["簡單（AI 收入 -25%，不騷擾）", "普通（會騷擾採礦車）", "困難（AI 收入 +35%，猛攻超武）", "殘酷（AI 收入 +75%，頻繁大軍壓境）"], 1)
 	var names := []
 	for p in MapS.PRESETS:
 		names.append("%s (%dx%d)" % [p.name, p.size, p.size])
@@ -120,8 +126,6 @@ func build_ui():
 	opts.mapsize.item_selected.connect(func(i): G.settings["mapsize"] = i; G.save_settings(); refresh_preview())
 	add_opt(grid, "money", "起始資金", ["$5,000", "$10,000", "$20,000", "$50,000"], 1)
 	add_opt(grid, "speed", "遊戲速度", ["慢速", "正常", "快速"], 1)
-	add_opt(grid, "crates", "隨機補給箱", ["開啟", "關閉"], 0)
-	add_opt(grid, "events", "時事事件", ["開啟（制裁/駭客/軍援…）", "關閉"], 0)
 	opts.map.item_selected.connect(func(_i): seed_v = randi(); refresh_preview())
 	opts.enemies.item_selected.connect(func(_i): refresh_preview())
 	var sp := Control.new()
@@ -130,20 +134,32 @@ func build_ui():
 	grid.add_child(Control.new())
 	var start := Button.new()
 	start.text = "開始作戰"
-	start.custom_minimum_size = Vector2(0, 52)
+	start.custom_minimum_size = Vector2(0, 48)
 	start.add_theme_font_override("font", G.font_bold)
 	start.add_theme_font_size_override("font_size", 22)
 	start.pressed.connect(_start)
 	grid.add_child(Control.new())
 	grid.add_child(start)
+	var crow := HBoxContainer.new()
+	crow.add_theme_constant_override("separation", 10)
 	var cbtn := Button.new()
 	cbtn.text = "戰役任務"
-	cbtn.custom_minimum_size = Vector2(0, 46)
+	cbtn.custom_minimum_size = Vector2(0, 42)
+	cbtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cbtn.add_theme_font_override("font", G.font_bold)
 	cbtn.add_theme_font_size_override("font_size", 19)
 	cbtn.pressed.connect(func(): camp.visible = true)
+	crow.add_child(cbtn)
+	var dbtn := Button.new()
+	dbtn.text = "每日挑戰"
+	dbtn.custom_minimum_size = Vector2(0, 42)
+	dbtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	dbtn.add_theme_font_override("font", G.font_bold)
+	dbtn.add_theme_font_size_override("font_size", 19)
+	dbtn.pressed.connect(func(): show_daily())
+	crow.add_child(dbtn)
 	grid.add_child(Control.new())
-	grid.add_child(cbtn)
+	grid.add_child(crow)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)
 	var hb := Button.new()
@@ -175,7 +191,7 @@ func build_ui():
 	var qb := Button.new()
 	qb.text = "離開"
 	qb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	qb.pressed.connect(func(): get_tree().quit())
+	qb.pressed.connect(func(): G.main.quit_game())
 	row.add_child(qb)
 	grid.add_child(Control.new())
 	grid.add_child(row)
@@ -219,6 +235,44 @@ func build_ui():
 	rb.text = "重新產生地形"
 	rb.pressed.connect(func(): seed_v = randi(); refresh_preview())
 	vb.add_child(rb)
+	# 戰場選項與規則修改器（勾選框）
+	var op := PanelContainer.new()
+	op.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	var ovb := VBoxContainer.new()
+	ovb.add_theme_constant_override("separation", 4)
+	op.add_child(ovb)
+	var rv := VBoxContainer.new()
+	rv.add_theme_constant_override("separation", 14)
+	root.remove_child(pv)
+	rv.add_child(pv)
+	rv.add_child(op)
+	root.add_child(rv)
+	var ot := Label.new()
+	ot.text = "戰場選項"
+	ot.add_theme_font_override("font", G.font_bold)
+	ot.add_theme_font_size_override("font_size", 18)
+	ot.add_theme_color_override("font_color", Color(1, 0.85, 0.35))
+	ovb.add_child(ot)
+	var og := GridContainer.new()
+	og.columns = 2
+	og.add_theme_constant_override("h_separation", 18)
+	ovb.add_child(og)
+	add_check(og, "crates", "隨機補給箱", true, "地圖上隨機出現補給箱")
+	add_check(og, "events", "時事事件", true, "制裁、駭客、軍援等隨機事件")
+	add_check(og, "weather", "動態天氣", true, "雨、霧、雪、沙塵暴影響射程與速度")
+	add_check(og, "contracts", "戰場委託", true, "限時支線任務，完成領賞金")
+	var mt := Label.new()
+	mt.text = "規則修改器（所有玩家適用）"
+	mt.add_theme_font_override("font", G.font_bold)
+	mt.add_theme_font_size_override("font_size", 16)
+	mt.add_theme_color_override("font_color", Color(1, 0.6, 0.4))
+	ovb.add_child(mt)
+	var mg := GridContainer.new()
+	mg.columns = 2
+	mg.add_theme_constant_override("h_separation", 18)
+	ovb.add_child(mg)
+	for k in MUTATORS:
+		add_check(mg, "mut_" + k, MUTATORS[k].name, false, MUTATORS[k].desc)
 	# help panel
 	help = PanelContainer.new()
 	help.set_anchors_preset(Control.PRESET_CENTER)
@@ -258,6 +312,35 @@ func _update_country_desc():
 	if flag_ctl != null:
 		flag_ctl.queue_redraw()
 
+const MUTATORS := {
+	"fastbuild": {"name": "快速建造", "desc": "所有建造與生產速度 ×2"},
+	"rich": {"name": "富礦", "desc": "採礦收入 ×1.5"},
+	"superfast": {"name": "核戰時代", "desc": "超級武器與特殊能力充能 ×2"},
+	"glass": {"name": "玻璃大砲", "desc": "所有傷害 ×1.6，戰鬥極快結束"},
+	"veteran": {"name": "老兵部隊", "desc": "所有新單位直接是老兵"},
+	"infantry": {"name": "步兵戰爭", "desc": "不能生產載具、飛機與艦艇（採礦車除外）"},
+	"nosuper": {"name": "禁用超級武器", "desc": "不能建造核彈井與氣象控制器"},
+	"turbo": {"name": "閃電戰", "desc": "所有單位移動速度 ×1.4"},
+}
+var checks := {}
+
+func add_check(grid: GridContainer, key: String, label: String, on: bool, tip: String):
+	var cb := CheckBox.new()
+	cb.text = label
+	cb.button_pressed = on
+	cb.tooltip_text = tip
+	cb.add_theme_font_size_override("font_size", 15)
+	cb.toggled.connect(func(_v): Sfx.play("click", -6.0))
+	grid.add_child(cb)
+	checks[key] = cb
+
+func selected_muts() -> Array:
+	var out := []
+	for k in MUTATORS:
+		if checks.has("mut_" + k) and checks["mut_" + k].button_pressed:
+			out.append(k)
+	return out
+
 func add_opt(grid: GridContainer, key: String, label: String, items: Array, sel: int):
 	var l := Label.new()
 	l.text = label
@@ -267,7 +350,7 @@ func add_opt(grid: GridContainer, key: String, label: String, items: Array, sel:
 	for it in items:
 		ob.add_item(it)
 	ob.select(sel)
-	ob.custom_minimum_size = Vector2(260, 40)
+	ob.custom_minimum_size = Vector2(260, 34)
 	ob.get_popup().theme = theme_res
 	ob.item_selected.connect(func(_i): Sfx.play("click", -6.0))
 	grid.add_child(ob)
@@ -286,6 +369,7 @@ func refresh_preview():
 	var p := preset.duplicate()
 	p["players"] = 1 + opts.enemies.selected + 1
 	p["seed"] = seed_v
+	p["shuffle"] = true
 	m.generate(p)
 	var img: Image = m.make_preview(true)
 	preview.texture = ImageTexture.create_from_image(img)
@@ -313,8 +397,12 @@ func _start():
 		"seed": seed_v,
 		"money": [5000, 10000, 20000, 50000][opts.money.selected],
 		"speed": [0.75, 1.0, 1.35][opts.speed.selected],
-		"crates": opts.crates.selected == 0,
-		"events": opts.events.selected == 0,
+		"crates": checks.crates.button_pressed,
+		"events": checks.events.button_pressed,
+		"mode": ["std", "survival", "koth"][opts.mode.selected],
+		"contracts": checks.contracts.button_pressed,
+		"weather": checks.weather.button_pressed,
+		"muts": selected_muts(),
 	}
 	G.main.start_game(s)
 
@@ -627,6 +715,8 @@ func show_records():
 		["生產單位", G.fmt_money(int(r.built))],
 		["消滅敵軍", G.fmt_money(int(r.killed))],
 		["單場最多擊殺", str(int(r.max_kills))],
+		["完成委託 / 佔領科技建築", "%d / %d" % [int(r.contracts), int(r.techs)]],
+		["生存模式最佳波數 / 據點勝場", "%d / %d" % [int(r.best_wave), int(r.koth_wins)]],
 		["損失單位 / 建築", "%s / %s" % [G.fmt_money(int(r.lost)), G.fmt_money(int(r.bld_lost))]],
 		["採礦總收入", "$" + G.fmt_money(float(r.harvested))],
 		["特殊武器發射", str(int(r.powers))],
@@ -714,6 +804,115 @@ func show_records():
 		dl.add_theme_font_size_override("font_size", 13)
 		dl.add_theme_color_override("font_color", Color(0.85, 0.8, 0.7) if un else Color(0.5, 0.5, 0.5))
 		vb.add_child(dl)
+
+# ───────────────────────── 每日挑戰 ─────────────────────────
+# 以日期決定當天的國家、地圖、對手、難度與 2 個規則修改器；所有玩家同一天拿到相同戰場
+static func today_code() -> int:
+	var d := Time.get_date_dict_from_system()
+	return int(d.year) * 10000 + int(d.month) * 100 + int(d.day)
+
+static func daily_settings(code: int) -> Dictionary:
+	var r := RandomNumberGenerator.new()
+	r.seed = hash("daily:%d" % code)
+	var cid: String = Defs.COUNTRY_ORDER[r.randi() % Defs.COUNTRY_ORDER.size()]
+	var foes := []
+	for c in Defs.COUNTRY_ORDER:
+		if Defs.COUNTRIES[c].faction != Defs.COUNTRIES[cid].faction:
+			foes.append(c)
+	var ec: String = foes[r.randi() % foes.size()]
+	var MapP: Array = preload("res://scripts/map.gd").PRESETS
+	var mi := r.randi() % mini(11, MapP.size())
+	var mk: Array = MUTATORS.keys()
+	var muts := []
+	while muts.size() < 2:
+		var k: String = mk[r.randi() % mk.size()]
+		if not k in muts and not (k == "infantry" and "nosuper" in muts):
+			muts.append(k)
+	var mode: String = ["std", "std", "std", "koth"][r.randi() % 4]
+	return {
+		"faction": Defs.COUNTRIES[cid].faction, "country": cid,
+		"enemy_country": ec, "enemy_faction": Defs.COUNTRIES[ec].faction,
+		"enemies": 1 + int(r.randi() % 3 == 0), "ai_allied": true,
+		"difficulty": 1 + int(r.randi() % 2), "map": MapP[mi], "seed": int(r.randi() % 1000000),
+		"money": 10000, "speed": 1.0, "crates": true, "events": true, "weather": true, "contracts": true,
+		"mode": mode, "muts": muts, "daily": code,
+	}
+
+var daily_panel: Control
+
+func show_daily():
+	if daily_panel != null:
+		daily_panel.queue_free()
+		daily_panel = null
+		return
+	var code := today_code()
+	var ds := daily_settings(code)
+	var RecS = preload("res://scripts/records.gd")
+	var r: Dictionary = RecS.get_rec()
+	daily_panel = PanelContainer.new()
+	daily_panel.position = Vector2(660, 200)
+	daily_panel.custom_minimum_size = Vector2(600, 0)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.06, 0.05, 0.06, 0.98)
+	sb.border_color = Color(1, 0.7, 0.2)
+	sb.set_border_width_all(2)
+	sb.set_content_margin_all(24)
+	daily_panel.add_theme_stylebox_override("panel", sb)
+	add_child(daily_panel)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 10)
+	daily_panel.add_child(vb)
+	var title := Label.new()
+	title.text = "每日挑戰　%d/%02d/%02d" % [code / 10000, (code / 100) % 100, code % 100]
+	title.add_theme_font_override("font", G.font_bold)
+	title.add_theme_font_size_override("font_size", 26)
+	title.add_theme_color_override("font_color", Color(1, 0.85, 0.35))
+	vb.add_child(title)
+	var mnames := []
+	for k in ds.muts:
+		mnames.append("%s（%s）" % [MUTATORS[k].name, MUTATORS[k].desc])
+	var lines := [
+		"我方：%s　　敵方：%s%s" % [Defs.COUNTRIES[ds.country].name, Defs.COUNTRIES[ds.enemy_country].name, "（＋1 名盟友）" if ds.enemies > 1 else ""],
+		"地圖：%s　　難度：%s　　模式：%s" % [ds.map.name, ["簡單", "普通", "困難", "殘酷"][ds.difficulty], "據點爭奪" if ds.mode == "koth" else "殲滅戰"],
+		"今日規則：",
+	]
+	for l in lines:
+		var lb := Label.new()
+		lb.text = l
+		lb.add_theme_font_size_override("font_size", 17)
+		vb.add_child(lb)
+	for m in mnames:
+		var lb := Label.new()
+		lb.text = "　◆ " + m
+		lb.add_theme_font_size_override("font_size", 16)
+		lb.add_theme_color_override("font_color", Color(1, 0.65, 0.45))
+		vb.add_child(lb)
+	var best := Label.new()
+	if int(r.get("daily_date", 0)) == code and float(r.get("daily_best", 0.0)) > 0.0:
+		var bt := float(r.daily_best)
+		best.text = "今日最佳：%02d:%02d 獲勝" % [int(bt) / 60, int(bt) % 60]
+	else:
+		best.text = "今日尚未完成。目標：盡快取得勝利！"
+	best.add_theme_font_override("font", G.font_bold)
+	best.add_theme_font_size_override("font_size", 18)
+	best.add_theme_color_override("font_color", Color(0.6, 1, 0.6))
+	vb.add_child(best)
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 12)
+	vb.add_child(hb)
+	var go := Button.new()
+	go.text = "開始挑戰"
+	go.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	go.custom_minimum_size = Vector2(0, 48)
+	go.add_theme_font_override("font", G.font_bold)
+	go.add_theme_font_size_override("font_size", 20)
+	go.pressed.connect(func(): Sfx.play("click", -2.0); G.main.start_game(daily_settings(code)))
+	hb.add_child(go)
+	var cl := Button.new()
+	cl.text = "關閉"
+	cl.custom_minimum_size = Vector2(120, 48)
+	cl.pressed.connect(func(): show_daily())
+	hb.add_child(cl)
 
 func show_loads():
 	if load_panel != null:

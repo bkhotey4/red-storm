@@ -68,6 +68,9 @@ func fire_random():
 	if hist.size() > 0 and hist[-1] == ev.id:
 		ev = EVENTS[randi() % EVENTS.size()]
 	var target = alive[randi() % alive.size()]
+	# 生存模式的敵軍沒有經濟，時事事件只影響玩家
+	if game.gmode != null and game.gmode.is_survival():
+		target = game.human
 	# 讓玩家稍微多一點好事、少一點壞事（簡單難度）
 	var diff: int = int(game.settings.get("difficulty", 1))
 	if target == game.human and ev.get("bad", false) and diff == 0 and randf() < 0.5:
@@ -92,6 +95,10 @@ func fire(ev: Dictionary, target):
 			target.money += 1500.0 + 500.0 * randi_range(0, 3)
 			var pre: String = "a_" if target.faction == "allies" else "s_"
 			var ids := [pre + "tank", pre + "tank", pre + ("ifv" if target.faction == "allies" else "flaktrk")]
+			if game.mut("infantry"):
+				var a_id: String = pre + ("jav" if target.faction == "allies" else "tesla")
+				var b_id: String = pre + ("rocket" if target.faction == "allies" else "flak")
+				ids = [a_id, a_id, a_id, b_id, b_id]
 			var cy = null
 			for b in game.buildings:
 				if b.player == target and not b.dead and b.def.role == "cy":

@@ -15,6 +15,9 @@ const PropS = preload("res://scripts/prop.gd")
 const MissionS = preload("res://scripts/missions.gd")
 const EventsS = preload("res://scripts/events.gd")
 const CrateS = preload("res://scripts/crate.gd")
+const ModesS = preload("res://scripts/modes.gd")
+const ContractS = preload("res://scripts/contracts.gd")
+const WeatherS = preload("res://scripts/weather.gd")
 
 const BUILD_GAP := 3
 
@@ -72,6 +75,12 @@ const SaveS = preload("res://scripts/saveload.gd")
 var crates: Array = []
 var crate_t := 30.0
 var objective := ""
+var gmode = null            # 遭遇戰特殊模式（生存 / 據點爭奪）
+var history: Array = []      # 戰後統計：每 15 秒記錄各方軍力
+var hist_t := 0.0
+var weather = null           # 動態天氣
+var contracts = null         # 戰場委託（遭遇戰支線任務）
+var mvp := {}                # 本場我方最佳單位 {name, kills, rank}
 
 func start(s: Dictionary):
 	settings = s
@@ -85,6 +94,7 @@ func start(s: Dictionary):
 	var mp := preset.duplicate()
 	mp["players"] = 1 + int(s.get("enemies", 1))
 	mp["seed"] = int(s.get("seed", randi()))
+	mp["shuffle"] = not s.has("mission")
 	map.generate(mp)
 	W = map.W
 	H = map.H
@@ -159,8 +169,11 @@ func start(s: Dictionary):
 		mission = MissionS.new()
 		mission.setup(self, s.mission)
 	else:
+		var md: String = str(s.get("mode", "std"))
 		for p in players:
 			if p.neutral:
+				continue
+			if md == "survival" and p != human:
 				continue
 			spawn_start(p)
 	world_ev = EventsS.new()
@@ -169,6 +182,15 @@ func start(s: Dictionary):
 	hud = HudS.new()
 	add_child(hud)
 	hud.setup(self)
+	if mission == null and str(s.get("mode", "std")) in ["survival", "koth"]:
+		gmode = ModesS.new()
+		gmode.setup(self, str(s.mode))
+	if mission == null and s.get("weather", true):
+		weather = WeatherS.new()
+		weather.setup(self)
+	if mission == null and str(s.get("mode", "std")) != "survival" and s.get("contracts", true):
+		contracts = ContractS.new()
+		contracts.setup(self)
 	center_on(Vector2(human.start_cell) + Vector2(0.5, 0.5), true)
 	reveal_all_now()
 	Sfx.say("construction_options", 0.0)
@@ -251,9 +273,19 @@ func setup_players(s: Dictionary):
 			2:
 				p.income_mult = 1.35
 				p.build_mult = 1.3
+			3:
+				# 殘酷：AI 經濟與生產大幅加成
+				p.income_mult = 1.75
+				p.build_mult = 1.6
 		players.append(p)
+		if str(s.get("mode", "std")) == "survival" and not s.has("mission"):
+			continue
 		var ai = AIS.new()
-		ai.setup(self, p, diff)
+		ai.setup(self, p, mini(diff, 2))
+		if diff >= 3:
+			ai.make_brutal()
+		if not s.has("mission"):
+			ai.set_persona(str(G.settings.get("debug_persona", AIS.PERSONAS.keys()[randi() % AIS.PERSONAS.size()])))
 		ais.append(ai)
 	neutral = PlayerS.new()
 	neutral.index = 99
@@ -272,6 +304,8 @@ func spawn_start(p):
 	mcv.facing = PI * 1.25
 	var inf := "a_gi" if f == "allies" else "s_con"
 	var tank := "a_tank" if f == "allies" else "s_tank"
+	if mut("infantry"):
+		tank = "a_rocket" if f == "allies" else "s_flak"
 	var toc := (Vector2(W, H) * 0.5 - c).normalized()
 	for k in 5:
 		var off := toc.rotated(randf_range(-1.2, 1.2)) * randf_range(2.0, 3.5)
@@ -292,6 +326,10 @@ func spawn_unit(p, id: String, at: Vector2):
 		u.max_hp *= hm
 		u.hp = u.max_hp
 		u.speed *= Defs.country_mult(p.country, "speed", id)
+	if u.ukind == "veh" and p.has_up("up_engine"):
+		u.speed *= 1.15
+	if mut("turbo"):
+		u.speed *= 1.4
 	if u.ukind == "air":
 		air_layer.add_child(u)
 	else:
@@ -388,6 +426,11 @@ func on_building_complete(b):
 			message("造船廠完工：右側「海軍」分頁可生產艦艇")
 		if b.def.role in ["radar", "tech", "fac", "bar", "ref"]:
 			Sfx.say("construction_options", 3.0)
+		if b.def.role == "radar" and mission == null and not has_meta("persona_intel"):
+			set_meta("persona_intel", true)
+			for ai in ais:
+				if ai.p != human and ai.p.alive and human.is_enemy_of(ai.p):
+					message("情報：%s 是「%s」型指揮官 — %s" % [ai.p.name, ai.persona_name(), AIS.PERSONAS[ai.persona].desc])
 	if b.def.has("super") and b.player != human and human.is_enemy_of(b.player):
 		message("警告：%s 已建成超級武器「%s」，倒數開始！" % [b.player.name, Defs.SUPER[b.def.super].name])
 		Sfx.play("alarm", -4.0)
@@ -411,7 +454,7 @@ func spawn_produced(p, id: String):
 			RecS.bump("drones")
 		if def.has("carrier"):
 			RecS.bump("carriers")
-	var vet: bool = p.vet_bonus
+	var vet: bool = p.vet_bonus or mut("veteran")
 	var role: String = p.producer_role(def)
 	var prod = null
 	var pb = p.primary.get(role)
@@ -676,6 +719,8 @@ func damage_area(p: Vector2, r: float, dmg: float, wh: String, att, primary = nu
 
 # ───────────────────────── events ─────────────────────────
 func on_entity_died(e):
+	if contracts != null:
+		contracts.on_death(e)
 	selection.erase(e)
 	for k in groups:
 		groups[k].erase(e)
@@ -794,6 +839,9 @@ func update_diplomacy(dt: float):
 
 func propose(from, to, kind: String) -> bool:
 	# 玩家向 AI 提議；回傳是否接受
+	if gmode != null and gmode.is_survival():
+		message("生存模式中的敵軍拒絕任何談判")
+		return false
 	if time < from.no_treaty_until or time < to.no_treaty_until:
 		message("輿論風向不利，目前無法締結條約")
 		return false
@@ -874,6 +922,9 @@ func human_allies() -> Array:
 	return out
 
 func notify_attack(victim, attacker):
+	if victim.player == human:
+		last_alert = victim.pos
+		last_alert_t = time
 	# 攻擊盟友會導致同盟破裂
 	if attacker != null and is_instance_valid(attacker) and attacker.player != victim.player:
 		var ap = attacker.player
@@ -989,6 +1040,14 @@ func engineer_enter(u, b):
 		u.player.power_dirty = true
 		if b.def.role == "oil":
 			u.player.money += 500
+		if contracts != null:
+			contracts.on_capture(u.player, b)
+		if OS.get_cmdline_user_args().has("--autotest") and b.def.role in ["oil", "techb"]:
+			print("  CAPTURE t=%d %s took %s" % [int(time), u.player.name, b.def.name])
+		if b.def.has("tech") and u.player == human:
+			if not settings.get("auto", false):
+				RecS.bump("techs")
+			message("%s：%s" % [b.def.name, b.def.desc.replace("工程師佔領後：", "")])
 		if u.player == human:
 			message("已佔領 %s！" % b.def.name)
 			Sfx.say("building_ready", 1.0)
@@ -1153,6 +1212,8 @@ func fire_power(p, kind: String, target: Vector2) -> bool:
 			Sfx.play("zap", 0.0)
 		"paradrop":
 			var ids := ["a_gi", "a_gi", "a_gi", "a_gi", "a_gi", "a_jav", "a_jav", "a_rocket", "a_rocket"]
+			if p.faction == "soviet":
+				ids = ["s_con", "s_con", "s_con", "s_con", "s_con", "s_con", "s_flak", "s_tesla", "s_tesla"]
 			for k in ids.size():
 				var at := target + Vector2(randf_range(-1.6, 1.6), randf_range(-1.6, 1.6))
 				var c := nearest_free(Vector2i(int(at.x), int(at.y)), 5)
@@ -1357,9 +1418,15 @@ func pick_crate(u, cr):
 				reveal(u.pos, 30.0)
 			txt = "補給箱：揭露地圖"
 		"unit":
-			var id: String = "a_tank" if p.faction == "allies" else "s_tank"
-			spawn_unit(p, id, u.pos + Vector2(0.8, 0.8))
-			txt = "補給箱：獲得一輛坦克！"
+			if mut("infantry"):
+				var iid: String = "a_jav" if p.faction == "allies" else "s_tesla"
+				for k in 3:
+					spawn_unit(p, iid, u.pos + Vector2(0.6 + k * 0.4, 0.8))
+				txt = "補給箱：獲得一支精銳步兵小隊！"
+			else:
+				var id: String = "a_tank" if p.faction == "allies" else "s_tank"
+				spawn_unit(p, id, u.pos + Vector2(0.8, 0.8))
+				txt = "補給箱：獲得一輛坦克！"
 	if p == human:
 		message(txt)
 	cr.queue_free()
@@ -1405,7 +1472,12 @@ func message(t: String):
 	if hud != null:
 		hud.add_message(t)
 
+var last_alert := Vector2(-1, -1)
+var last_alert_t := -100.0
+
 func ping(p: Vector2):
+	last_alert = p
+	last_alert_t = time
 	if hud != null:
 		hud.ping(p)
 
@@ -1462,6 +1534,7 @@ func update_visibility():
 			u.visible = is_explored(int(u.pos.x), int(u.pos.y))
 	for b in buildings:
 		if b.player == human or human.allies.has(b.player.index):
+			b.visible = true
 			if not b.has_meta("rv"):
 				b.set_meta("rv", true)
 				reveal_entity(b)
@@ -1473,30 +1546,59 @@ func update_visibility():
 
 # ───────────────────────── main loop ─────────────────────────
 func _process(delta: float):
+	var t0 := Time.get_ticks_usec()
 	update_camera(delta)
 	map.activate_chunks()
+	_pf("chunks", t0)
 	if paused or game_over:
 		overlay.queue_redraw()
 		return
 	var dt := minf(delta, 0.05) * speed
 	time += dt
+	t0 = Time.get_ticks_usec()
 	rebuild_buckets()
+	_pf("buckets", t0)
+	t0 = Time.get_ticks_usec()
 	for p in players:
 		p.update(dt)
+	_pf("players", t0)
+	t0 = Time.get_ticks_usec()
 	for u in units.duplicate():
 		if not u.dead:
 			u.update(dt)
+	_pf("units", t0)
+	t0 = Time.get_ticks_usec()
 	for b in buildings.duplicate():
 		if not b.dead:
 			b.update(dt)
+	_pf("buildings", t0)
+	t0 = Time.get_ticks_usec()
 	fx.update(dt)
+	_pf("fx", t0)
+	t0 = Time.get_ticks_usec()
 	update_ew(dt)
 	update_diplomacy(dt)
 	if world_ev != null:
 		world_ev.update(dt)
+	if gmode != null:
+		gmode.update(dt)
+	if contracts != null:
+		contracts.update(dt)
+	if weather != null:
+		weather.update(dt)
+	hist_t -= dt
+	if hist_t <= 0.0:
+		hist_t = 15.0
+		sample_history()
+	_pf("misc", t0)
+	t0 = Time.get_ticks_usec()
 	map.update(dt)
+	_pf("map", t0)
+	t0 = Time.get_ticks_usec()
 	for ai in ais:
 		ai.update(dt)
+	_pf("ai", t0)
+	t0 = Time.get_ticks_usec()
 	for i in range(events.size() - 1, -1, -1):
 		if events[i].t <= time:
 			var ev = events[i]
@@ -1515,19 +1617,65 @@ func _process(delta: float):
 		check_t = 1.0
 		check_victory()
 		update_crates(1.0)
+		update_techs()
 	ack_t -= dt
 	update_hover()
 	overlay.queue_redraw()
+	_pf("tail", t0)
+
+var prof := {}
+func _pf(k: String, t0: int):
+	prof[k] = float(prof.get(k, 0.0)) * 0.95 + float(Time.get_ticks_usec() - t0) * 0.05
+
+# 科技建築效果（每秒一次）
+func update_techs():
+	var hosp := {}
+	var shop := {}
+	for b in buildings:
+		if b.dead or b.player.neutral or not b.def.has("tech"):
+			continue
+		if b.def.tech == "hosp":
+			hosp[b.player] = true
+		elif b.def.tech == "shop":
+			shop[b.player] = true
+	if hosp.is_empty() and shop.is_empty():
+		return
+	for u in units:
+		if u.dead or u.hp >= u.max_hp:
+			continue
+		if u.ukind == "inf" and hosp.has(u.player):
+			u.heal(u.max_hp * 0.03)
+		elif (u.ukind == "veh" or u.ukind == "ship") and shop.has(u.player):
+			u.heal(u.max_hp * 0.02)
+
+# 規則修改器是否啟用
+func mut(k: String) -> bool:
+	return k in settings.get("muts", [])
+
+func sample_history():
+	var row := {"t": time}
+	for p in players:
+		if not p.neutral:
+			row[p.index] = strength(p) if p.alive else 0.0
+	history.append(row)
+
+func note_kill(e):
+	if e.player != human or e.kind != "unit":
+		return
+	if e.kills > int(mvp.get("kills", 0)):
+		mvp = {"name": e.def.name, "kills": e.kills, "rank": e.rank}
 
 func check_victory():
 	for p in players:
 		if p.neutral or not p.alive:
 			continue
+		if gmode != null and gmode.is_survival() and p != human:
+			continue
 		if mission != null and mission.id == "m1" and p == human:
 			continue
 		var has := false
 		for b in buildings:
-			if b.player == p and not b.dead and not b.def.get("wall", false) and not b.def.get("civ", false):
+			if b.player == p and not b.dead and not b.def.get("wall", false) and not b.def.get("civ", false) and not b.def.role in ["oil", "techb"]:
 				has = true
 				break
 		if not has:
@@ -1550,6 +1698,13 @@ func check_victory():
 		if r != "":
 			end_game(r == "win")
 		return
+	if gmode != null:
+		var r: String = gmode.check()
+		if r != "":
+			end_game(r == "win")
+			return
+		if gmode.is_survival():
+			return
 	if not human.alive:
 		end_game(false)
 		return
@@ -1565,6 +1720,7 @@ func end_game(win: bool):
 		return
 	game_over = true
 	result = "win" if win else "lose"
+	sample_history()
 	cmd_mode = ""
 	place_id = ""
 	if win and mission != null:
@@ -2053,7 +2209,18 @@ func key_press(k: InputEventKey):
 			for e in selection.duplicate():
 				if is_instance_valid(e) and e.kind == "building" and e.player == human and not e.occupants.is_empty():
 					garrison_exit(e)
-		KEY_H, KEY_SPACE:
+		KEY_SPACE:
+			# 空白鍵：跳到最近一次警報（遇襲 / 雷達標記）位置；沒有警報就回基地
+			if time - last_alert_t < 60.0 and last_alert.x >= 0:
+				center_on(last_alert)
+				return
+			var cy = null
+			for b in buildings:
+				if b.player == human and b.def.role == "cy":
+					cy = b
+			if cy != null:
+				center_on(cy.pos)
+		KEY_H:
 			var cy = null
 			for b in buildings:
 				if b.player == human and b.def.role == "cy":
@@ -2085,6 +2252,18 @@ func key_press(k: InputEventKey):
 			if not selection.is_empty() and is_instance_valid(selection[0]):
 				var tid: String = selection[0].type_id
 				select_list(units.filter(func(u): return u.player == human and u.type_id == tid))
+		KEY_F:
+			var n := 0
+			var nm := ""
+			for u in own_selected_units():
+				if u.use_ability():
+					n += 1
+					nm = u.ability_name()
+			if n > 0:
+				Sfx.play("radio", -8.0)
+				message("%d 個單位施放「%s」" % [n, nm] if n > 1 else "施放「%s」" % nm)
+			elif not own_selected_units().is_empty():
+				message("選取的單位沒有可用技能（步兵：掘壕固守／載具：煙霧彈，冷卻中則無法施放）")
 		KEY_Z:
 			cmd_mode = "sell"
 		KEY_X:

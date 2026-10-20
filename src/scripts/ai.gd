@@ -41,6 +41,87 @@ func setup(g, pl, d: int):
 			attack_size = 10
 	next_attack += randf_range(-20, 20)
 
+var brutal := false
+
+# ───────────────────────── 指揮官性格 ─────────────────────────
+# 遭遇戰中每名電腦隨機一種風格，影響進攻時機、兵種偏好與防禦規模
+const PERSONAS := {
+	"balanced": {"name": "均衡型", "desc": "攻守兼備，沒有明顯偏好"},
+	"blitz": {"name": "閃擊者", "desc": "很早就發動小規模快攻，偏好高速部隊，防禦薄弱"},
+	"turtle": {"name": "龜縮者", "desc": "大量防禦塔與圍牆，偏好遠程火砲，晚期才大舉進攻"},
+	"air": {"name": "空中霸主", "desc": "大量無人機與飛機，地面部隊較少"},
+	"armor": {"name": "鋼鐵洪流", "desc": "偏好重型坦克集團衝鋒，步兵很少"},
+}
+var persona := "balanced"
+
+func set_persona(k: String):
+	persona = k
+	match k:
+		"blitz":
+			next_attack *= 0.55
+			attack_size = maxi(4, int(attack_size * 0.6))
+			raid_t *= 0.6
+		"turtle":
+			next_attack *= 1.5
+			attack_size = int(attack_size * 1.5)
+			raid_t *= 2.0
+		"armor":
+			next_attack *= 1.1
+			attack_size = int(attack_size * 1.1)
+
+func persona_name() -> String:
+	return PERSONAS[persona].name
+
+# 依性格調整兵種權重
+func persona_weight(id: String) -> float:
+	if persona == "balanced":
+		return 1.0
+	var d: Dictionary = Defs.get_def(id)
+	var w := 1.0
+	match persona:
+		"blitz":
+			if float(d.get("speed", 1.0)) >= 2.0 and d.get("kind", "") == "veh":
+				w = 2.5
+			elif d.get("cat", "") == "infantry":
+				w = 1.2
+			elif float(d.get("cost", 0)) >= 1500:
+				w = 0.4
+		"turtle":
+			var wp: Dictionary = Defs.WEAPONS.get(d.get("weapon", ""), {})
+			if float(wp.get("range", 0.0)) >= 10.0:
+				w = 3.0
+			elif d.get("cat", "") == "air":
+				w = 0.5
+		"air":
+			if d.get("cat", "") == "air":
+				w = 0.8 if d.get("kamikaze", false) and d.get("faction", "") == "soviet" else 2.2
+				if not d.get("kamikaze", false):
+					w = 2.8
+			elif d.get("kind", "") == "veh":
+				w = 0.8
+		"armor":
+			if d.get("armor", "") == "heavy" and d.get("kind", "") == "veh" and not d.get("harvester", false) and not d.has("mcv"):
+				w = 3.0
+			elif d.get("cat", "") == "infantry":
+				w = 0.4
+	return w
+
+func persona_def_bonus() -> int:
+	match persona:
+		"turtle":
+			return 5
+		"blitz":
+			return -2
+	return 0
+
+# 殘酷難度：沿用困難 AI 的行為，但更早、更大規模地進攻並積極研究科技
+func make_brutal():
+	brutal = true
+	next_attack = 150.0 + randf_range(-15, 15)
+	attack_size = 12
+	raid_t = 170.0
+	research_t = 140.0
+
 var water_ok := -1
 var raid_t := 240.0
 var raid_group: Array = []
@@ -87,6 +168,10 @@ func enemy_dir() -> Vector2:
 	return (best - bp).normalized()
 
 func rally_pos() -> Vector2:
+	# 據點爭奪：普通/困難 AI 把待命部隊集結在中央指揮所，簡單 AI 集結在半路
+	if game.gmode != null and game.gmode.is_koth() and game.time > game.gmode.KOTH_OPEN - 40.0:
+		var h: Vector2 = game.gmode.hill
+		return h if diff >= 1 else base_pos().lerp(h, 0.55)
 	return base_pos() + enemy_dir() * 6.0
 
 func update(dt: float):
@@ -102,11 +187,28 @@ func update(dt: float):
 		place_ready()
 		manage_buildings()
 		manage_production()
+		manage_research()
 		manage_walls()
 	manage_army()
 	manage_raid()
 	manage_super()
 	manage_repair()
+
+# 有餘錢時研究科技升級（簡單 AI 不研究；困難 AI 門檻較低）
+var research_t := 200.0
+func manage_research():
+	if diff == 0 or game.time < research_t or not p.queues.upgrade.is_empty():
+		return
+	var di := 3 if brutal else diff
+	if p.money < [99999.0, 3500.0, 2500.0, 1800.0][di]:
+		return
+	research_t = game.time + [0.0, 90.0, 60.0, 40.0][di]
+	var opts: Array = []
+	for id in Defs.BUILD_ORDER.upgrade:
+		if p.can_build(id):
+			opts.append(id)
+	if not opts.is_empty():
+		p.enqueue(opts[randi() % opts.size()])
 
 func manage_mcv():
 	var has_cy = p.has_role("cy") or p.count_role("cy") > 0
@@ -178,7 +280,7 @@ func manage_buildings():
 			if step[0] == "def":
 				if p.count_role("radar") > 0 or int(step[1]) <= 2:
 					want = int(step[1])
-		want = mini(want, 2 + diff * 3)
+		want = maxi(1, mini(want, 2 + diff * 3) + persona_def_bonus())
 		if ndef < want and p.money > 800:
 			var id := role_id("def")
 			if p.can_build(id):
@@ -246,7 +348,9 @@ func manage_walls():
 	if wall_t > 0.0:
 		return
 	wall_t = 18.0
-	var limit: int = [0, 14, 26][diff]
+	var limit: int = [0, 14, 26][diff] * (2 if persona == "turtle" else 1)
+	if persona == "turtle" and limit == 0:
+		limit = 10
 	var wid := pre + "wall"
 	if limit == 0 or p.money < 700 or not p.can_build(wid):
 		return
@@ -360,9 +464,10 @@ func pick(opts: Array) -> String:
 	var valid := []
 	var tot := 0
 	for o in opts:
-		if int(o[1]) > 0 and p.can_build(o[0]):
-			valid.append(o)
-			tot += int(o[1])
+		var w := int(round(float(o[1]) * persona_weight(o[0]) * 2.0))
+		if w > 0 and p.can_build(o[0]):
+			valid.append([o[0], w])
+			tot += w
 	if tot == 0:
 		return ""
 	var r := randi() % tot
@@ -377,7 +482,7 @@ func nearest_oil():
 	var best = null
 	var bd := 1e9
 	for b in game.buildings:
-		if b.def.role == "oil" and b.player != p and not b.dead and (b.player.neutral or p.is_enemy_of(b.player)):
+		if b.def.role in ["oil", "techb"] and b.player != p and not b.dead and (b.player.neutral or p.is_enemy_of(b.player)):
 			var d: float = b.pos.distance_to(bp)
 			if d < bd:
 				bd = d
@@ -525,8 +630,8 @@ func launch_attack(home: Array):
 			u.cmd_attack(t)
 		else:
 			u.cmd_move(t.pos + Vector2(randf_range(-1.5, 1.5), randf_range(-1.5, 1.5)), true)
-	next_attack = game.time + [260.0, 170.0, 120.0][diff]
-	attack_size = mini(attack_size + [1, 2, 3][diff], 30)
+	next_attack = game.time + ([260.0, 170.0, 120.0][diff] if not brutal else 95.0)
+	attack_size = mini(attack_size + ([1, 2, 3][diff] if not brutal else 4), 36)
 
 func pick_target(from: Vector2, prefer_def: bool):
 	var best = null
