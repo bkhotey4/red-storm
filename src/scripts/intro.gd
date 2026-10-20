@@ -1,10 +1,15 @@
 extends Node2D
-# 片頭動畫：混合戰爭（60 秒，可按 Esc / 點擊跳過）
-# 旁白：Windows 上用系統語音（英文）朗讀；字幕：英文大字 + 中文小字
+# 片頭動畫：混合戰爭（支援 5 分鐘真實新聞結合開場影片 & 2.5 分鐘宣傳影片，可按 Esc / 點擊跳過，按 Tab 切換版本）
+# 旁白：內嵌真實新聞主播與軍事指揮官英語語音 + 現代交響電子配樂
 
 const DUR := 60.0
 const W := 1920.0
 const H := 1080.0
+
+var video_mode := "5min" # "5min" (300s opening film) or "promo" (150s promotional trailer)
+var vsp: VideoStreamPlayer = null
+var use_video_stream := false
+var video_dur := 300.0
 
 # [開始秒, 英文, 中文]
 const LINES := [
@@ -79,11 +84,40 @@ func _ready():
 	sub_zh.position = Vector2(0, H - 135)
 	sub_zh.size = Vector2(W, 40)
 	add_child(sub_zh)
+	if record_dir == "" and _setup_video_stream():
+		use_video_stream = true
+		sub_en.visible = false
+		sub_zh.visible = false
+		return
 	Sfx.music("intro")
 	start_tts()
 
+func _setup_video_stream() -> bool:
+	var vpath := "res://video/redstorm_intro_5min.ogv"
+	video_dur = 300.0
+	if video_mode == "promo":
+		vpath = "res://video/redstorm_promo_trailer.ogv"
+		video_dur = 150.0
+	if not FileAccess.file_exists(vpath):
+		if FileAccess.file_exists("res://video/redstorm_intro_cinematic.ogv"):
+			vpath = "res://video/redstorm_intro_cinematic.ogv"
+			video_dur = 60.0
+		else:
+			return false
+	var vst := VideoStreamTheora.new()
+	vst.file = vpath
+	if vsp != null:
+		vsp.queue_free()
+	vsp = VideoStreamPlayer.new()
+	vsp.stream = vst
+	vsp.self_modulate = Color(1, 1, 1, 0)
+	add_child(vsp)
+	vsp.finished.connect(finish)
+	vsp.play()
+	return true
+
 func start_tts():
-	if record_dir != "" or tts_started:
+	if record_dir != "" or tts_started or use_video_stream:
 		return
 	tts_started = true
 	if not ProjectSettings.get_setting("audio/general/text_to_speech", false):
@@ -101,9 +135,16 @@ func start_tts():
 func _exit_tree():
 	if tts_started:
 		DisplayServer.tts_stop()
+	if vsp != null and vsp.is_playing():
+		vsp.stop()
 
 func _input(ev: InputEvent):
 	if record_dir != "":
+		return
+	if ev is InputEventKey and ev.pressed and ev.keycode == KEY_TAB and use_video_stream:
+		video_mode = "promo" if video_mode == "5min" else "5min"
+		t = 0.0
+		_setup_video_stream()
 		return
 	if (ev is InputEventKey and ev.pressed and (ev.keycode == KEY_ESCAPE or ev.keycode == KEY_SPACE or ev.keycode == KEY_ENTER)) or (ev is InputEventMouseButton and ev.pressed):
 		finish()
@@ -112,9 +153,17 @@ func finish():
 	if done:
 		return
 	done = true
+	if vsp != null and vsp.is_playing():
+		vsp.stop()
 	finished.emit()
 
 func _process(delta: float):
+	if use_video_stream:
+		t += delta
+		queue_redraw()
+		if t >= video_dur + 1.5:
+			finish()
+		return
 	var dt := delta if record_dir == "" else 1.0 / 24.0
 	t += dt
 	if t >= DUR + 1.5:
@@ -182,6 +231,20 @@ func fade(a: float, b: float, c: float, d: float) -> float:
 	return 1.0
 
 func _draw():
+	if use_video_stream and vsp != null:
+		var vs := get_viewport_rect().size
+		draw_rect(Rect2(Vector2.ZERO, vs), Color(0, 0, 0))
+		var vtex := vsp.get_video_texture()
+		if vtex != null:
+			draw_texture_rect(vtex, Rect2(Vector2.ZERO, vs), false)
+		# 操作提示放右上角（避開影片底部的新聞跑馬燈），播放幾秒後淡出
+		var mode_tag := "開場影片" if video_mode == "5min" else "宣傳片"
+		var hint := "%s　Tab：切換開場影片／宣傳片　Esc／空白鍵：跳過" % mode_tag
+		var ha := clampf(1.0 - (t - 6.0) / 1.5, 0.35, 1.0)
+		var hw := G.font.get_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x + 24.0
+		draw_rect(Rect2(vs.x - hw - 16, 14, hw, 28), Color(0, 0, 0, 0.55 * ha))
+		draw_string(G.font, Vector2(vs.x - hw - 4, 34), hint, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.92, 0.92, 0.9, ha))
+		return
 	draw_rect(Rect2(0, 0, W, H), Color(0.02, 0.02, 0.03))
 	draw_news()
 	draw_drones()

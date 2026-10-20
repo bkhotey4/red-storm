@@ -373,6 +373,17 @@ func _ready():
 		await RenderingServer.frame_post_draw
 		get_viewport().get_texture().get_image().save_png(shot_dir + "/menu.png")
 		get_tree().quit()
+	elif args.has("--introshot") or args.has("--promoshot"):
+		var sd := "/tmp/shots"
+		for a in args:
+			if a.begins_with("--shots="):
+				sd = a.substr(8)
+		play_intro(false, "promo" if args.has("--promoshot") else "5min")
+		await get_tree().create_timer(9.0).timeout
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png(sd + "/intro.png")
+		print("INTROSHOT video=", intro.use_video_stream if intro != null else "none", " playing=", intro.vsp.is_playing() if intro != null and intro.vsp != null else false, " t=", intro.t if intro != null else -1.0)
+		get_tree().quit()
 	elif args.has("--briefshot"):
 		var md: Dictionary = preload("res://scripts/missions.gd").find("h4")
 		briefing = BriefS.new()
@@ -403,12 +414,13 @@ func _ready():
 var intro = null
 const IntroS = preload("res://scripts/intro.gd")
 
-func play_intro(from_menu: bool):
+func play_intro(from_menu: bool, mode := "5min"):
 	Sfx.stop_all()
 	if menu != null:
 		menu.queue_free()
 		menu = null
 	intro = IntroS.new()
+	intro.video_mode = mode
 	add_child(intro)
 	intro.finished.connect(func():
 		intro.queue_free()
@@ -416,6 +428,9 @@ func play_intro(from_menu: bool):
 		G.settings["intro_seen"] = true
 		G.save_settings()
 		to_menu())
+
+func play_promo():
+	play_intro(true, "promo")
 
 const SaveS = preload("res://scripts/saveload.gd")
 
