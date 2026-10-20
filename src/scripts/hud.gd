@@ -1026,6 +1026,20 @@ func toggle_pause_menu():
 		cb.button_pressed = G.settings.get("edge_scroll", true)
 		cb.toggled.connect(func(v): G.settings["edge_scroll"] = v; G.save_settings())
 		vb.add_child(cb)
+		var srow := HBoxContainer.new()
+		var slb := Label.new()
+		slb.text = "畫面捲動速度"
+		slb.custom_minimum_size = Vector2(90, 0)
+		srow.add_child(slb)
+		var ssl := HSlider.new()
+		ssl.min_value = 0.5
+		ssl.max_value = 2.5
+		ssl.step = 0.1
+		ssl.value = float(G.settings.get("scroll_speed", 1.0))
+		ssl.custom_minimum_size = Vector2(180, 24)
+		ssl.value_changed.connect(func(v): G.settings["scroll_speed"] = v; G.save_settings())
+		srow.add_child(ssl)
+		vb.add_child(srow)
 		var lp := CheckBox.new()
 		lp.text = "左鍵拖曳移動畫面（框選改用 Shift＋拖曳）"
 		lp.button_pressed = G.settings.get("left_pan", false)

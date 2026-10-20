@@ -239,6 +239,11 @@ func _ready():
 				C.cur.target.take_damage(1e6, null, "he")})
 			game.events.append({"t": 24.0, "fn": func():
 				print("  CONTRACTS done=", C.done, " failed=", C.failed, " money=", int(game.human.money))})
+		if args.has("--camlog"):
+			game.ais = game.ais.filter(func(a): return a.p != game.human)
+			for k in 30:
+				game.events.append({"t": 1.0 + k * 1.0, "fn": func():
+					print("  CAM t=%d pos=%s mouse=%s focus=%s" % [int(game.time), str(game.cam.position.round()), str(get_viewport().get_mouse_position().round()), DisplayServer.window_is_focused()])})
 		if args.has("--tipsshot"):
 			game.tip_until = 90.0
 		if args.has("--inputtest"):

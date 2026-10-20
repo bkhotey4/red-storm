@@ -1763,9 +1763,11 @@ func clamp_cam():
 	cam.position.x = clampf(cam.position.x, minx + vs.x * 0.5, maxx - vs.x * 0.5) if maxx - minx > vs.x else (minx + maxx) * 0.5
 	cam.position.y = clampf(cam.position.y, miny + vs.y * 0.5, maxy - vs.y * 0.5) if maxy - miny > vs.y else (miny + maxy) * 0.5
 
+var scroll_hold := 0.0      # 持續捲動秒數（越久越快）
+
 func update_camera(delta: float):
 	var v := Vector2.ZERO
-	var spd := 1100.0 / zoom
+	var spd := 1100.0 * float(G.settings.get("scroll_speed", 1.0)) / zoom
 	if Input.is_key_pressed(KEY_LEFT):
 		v.x -= 1
 	if Input.is_key_pressed(KEY_RIGHT):
@@ -1776,19 +1778,31 @@ func update_camera(delta: float):
 		v.y += 1
 	var mp := get_viewport().get_mouse_position()
 	var vs := get_viewport_rect().size
-	if G.settings.get("edge_scroll", true) and DisplayServer.window_is_focused() and not panning:
-		var m := 6.0
-		if mp.x <= m:
+	if G.settings.get("edge_scroll", true) and DisplayServer.window_is_focused() and not panning and not rheld and not lpan:
+		# 邊緣捲動：14 像素寬的感應帶；桌面版滑鼠移出視窗（標題列、工作列）也繼續捲動
+		if not OS.has_feature("web"):
+			var wp := DisplayServer.window_get_position()
+			var ws := Vector2(DisplayServer.window_get_size())
+			var gm := Vector2(DisplayServer.mouse_get_position() - wp)
+			if ws.x > 0.0 and ws.y > 0.0:
+				mp = gm * vs / ws
+		var m := 14.0
+		if mp.x <= m and mp.x > -200.0:
 			v.x -= 1
-		elif mp.x >= vs.x - m:
+		elif mp.x >= vs.x - m and mp.x < vs.x + 200.0:
 			v.x += 1
-		if mp.y <= m:
+		if mp.y <= m and mp.y > -200.0:
 			v.y -= 1
-		elif mp.y >= vs.y - m:
+		elif mp.y >= vs.y - m and mp.y < vs.y + 200.0:
 			v.y += 1
 	if v != Vector2.ZERO:
-		cam.position += v.normalized() * spd * delta
+		# 加速：按住 0.8 秒內從 0.75 倍提升到 1.6 倍
+		scroll_hold += delta
+		var acc := lerpf(0.75, 1.6, clampf(scroll_hold / 0.8, 0.0, 1.0))
+		cam.position += v.normalized() * spd * acc * delta
 		cam_moved = true
+	else:
+		scroll_hold = 0.0
 	clamp_cam()
 	cam.zoom = Vector2(zoom, zoom)
 	cam.offset = fx.shake_off() if fx != null else Vector2.ZERO
